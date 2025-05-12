@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Processing Pipeline</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="header">
+        <h1>File Processing Pipeline</h1>
+        <div class="user-info">
+            <span>Welcome, {{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
+            {% if is_admin %}
+            <a href="{{ url_for('register') }}" class="btn btn-small">Register User</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="container">
+        <h2>Process Overview</h2>
+        <div class="table-container">
+            <table class="process-table">
+                <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Status</th>
+                        <th>Last Update</th>
+                        <th>Assigned Users</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for step_data in process_overview %}
+                    <tr>
+                        <td>{{ step_data.name|capitalize }}</td>
+                        <td class="status-{{ step_data.status|lower|replace(' ', '-') }}">{{ step_data.status }}</td>
+                        <td>{{ step_data.last_update|default('Never', true) }}</td>
+                        <td>{{ step_data.assigned_users|join(', ') }}</td>
+                        <td>
+                            {% if step_data.can_edit %}
+                            <button class="btn btn-small upload-btn" data-step="{{ step_data.name }}">Upload</button>
+                            {% else %}
+                            <span class="disabled-text">Cannot Edit</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div id="upload-form-container" class="hidden">
+            <h2>Upload New File</h2>
+            <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+                <div class="form-group">
+                    <label for="supplier">Supplier:</label>
+                    <input type="text" id="supplier" name="supplier" required>
+                </div>
+                <div class="form-group">
+                    <label for="step">Step:</label>
+                    <select id="step" name="step">
+                        {% for step in steps %}
+                        <option value="{{ step }}">{{ step|capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="file_id">File ID (for existing file):</label>
+                    <input type="text" id="file_id" name="file_id" placeholder="Leave empty for new file">
+                </div>
+                <div class="form-group">
+                    <label for="file">File:</label>
+                    <input type="file" id="file" name="file" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn">Upload</button>
+                    <button type="button" class="btn btn-secondary" id="cancel-upload">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <h2>Files in Process</h2>
+        <div class="files-container">
+            {% for file_id, file in files.items() %}
+            <div class="file-card">
+                <h3>{{ file.supplier }} - {{ file.original_filename }}</h3>
+                <p>File ID: {{ file_id }}</p>
+                <p>Current Step: {{ file.current_step|capitalize }}</p>
+
+                <div class="steps">
+                    {% for step in steps %}
+                        {% set step_completed = false %}
+                        {% for entry in file.history %}
+                            {% if entry.step == step %}
+                                {% set step_completed = true %}
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if step == file.current_step %}
+                            <div class="step current-step">{{ step|capitalize }}</div>
+                        {% elif step_completed %}
+                            <div class="step completed-step">{{ step|capitalize }}</div>
+                        {% else %}
+                            <div class="step pending-step">{{ step|capitalize }}</div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+
+                <h4>History</h4>
+                <div class="history-container">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Step</th>
+                                <th>Timestamp</th>
+                                <th>User</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in file.history %}
+                            <tr>
+                                <td>{{ entry.step|capitalize }}</td>
+                                <td>{{ entry.timestamp }}</td>
+                                <td>{{ entry.user }}</td>
+                                <td>
+                                    <a href="{{ url_for('download_file', file_id=file_id, step=entry.step) }}" class="btn btn-small">Download</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <p>No files in process.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        // Show/hide upload form
+        document.querySelectorAll('.upload-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const step = this.getAttribute('data-step');
+                document.getElementById('step').value = step;
+                document.getElementById('upload-form-container').classList.remove('hidden');
+            });
+        });
+
+        document.getElementById('cancel-upload').addEventListener('click', function() {
+            document.getElementById('upload-form-container').classList.add('hidden');
+        });
+    </script>
+</body>
+</html>
