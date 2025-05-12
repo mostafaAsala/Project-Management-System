@@ -254,9 +254,12 @@ def file_pipeline(file_id):
 
     file = files_db[file_id]
 
+    # Use file's custom steps if available, otherwise use default steps
+    file_steps = file.get('custom_steps', steps)
+
     # Get status for each step in the pipeline
     step_statuses = {}
-    for step in steps:
+    for step in file_steps:
         step_data = {
             'status': 'Not Started',
             'last_update': None,
@@ -281,7 +284,7 @@ def file_pipeline(file_id):
     return render_template('file_pipeline.html',
                           file=file,
                           file_id=file_id,
-                          steps=steps,
+                          steps=file_steps,
                           step_statuses=step_statuses,
                           username=session['username'],
                           is_admin=users_db.get(session['username'], {}).get('is_admin', False))
@@ -371,11 +374,15 @@ def upload_file():
 
     # Update database
     if file_id not in files_db:
+        # Create a copy of the default steps for this file
+        file_steps = steps.copy()
+
         files_db[file_id] = {
             'supplier': supplier,
             'original_filename': filename,
             'current_step': step,
-            'history': []
+            'history': [],
+            'custom_steps': file_steps  # Add custom steps for this file
         }
 
     files_db[file_id]['history'].append({
@@ -442,10 +449,13 @@ def upload_to_step():
 
     # Update current step if this is the current step
     if files_db[file_id]['current_step'] == step:
+        # Use file's custom steps if available
+        file_steps = files_db[file_id].get('custom_steps', steps)
+
         # If the step is completed, move to the next step
-        current_index = steps.index(step)
-        if current_index < len(steps) - 1:
-            files_db[file_id]['current_step'] = steps[current_index + 1]
+        current_index = file_steps.index(step)
+        if current_index < len(file_steps) - 1:
+            files_db[file_id]['current_step'] = file_steps[current_index + 1]
 
     flash('File uploaded successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
@@ -517,8 +527,10 @@ def update_status():
     if file_id not in files_db:
         return jsonify({"success": False, "message": "File not found"}), 404
 
-    if step not in steps:
-        return jsonify({"success": False, "message": "Invalid step"}), 400
+    # Check if step is valid for this file
+    file_steps = files_db[file_id].get('custom_steps', steps)
+    if step not in file_steps:
+        return jsonify({"success": False, "message": "Invalid step for this file"}), 400
 
     if not is_authorized_for_step(session['username'], step):
         return jsonify({"success": False, "message": "Not authorized to update this step"}), 403
@@ -537,11 +549,249 @@ def update_status():
 
         # If completed, move to next step
         if status == 'Completed' and files_db[file_id]['current_step'] == step:
-            current_index = steps.index(step)
-            if current_index < len(steps) - 1:
-                files_db[file_id]['current_step'] = steps[current_index + 1]
+            # Use file's custom steps if available
+            file_steps = files_db[file_id].get('custom_steps', steps)
+
+            current_index = file_steps.index(step)
+            if current_index < len(file_steps) - 1:
+                files_db[file_id]['current_step'] = file_steps[current_index + 1]
 
     return jsonify({"success": True})
+
+# File-specific step management routes
+@app.route('/manage_file_steps/<file_id>')
+def manage_file_steps(file_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    if file_id not in files_db:
+        flash('File not found')
+        return redirect(url_for('index'))
+
+    file = files_db[file_id]
+
+    # Use file's custom steps if available, otherwise use default steps
+    file_steps = file.get('custom_steps', steps.copy())
+
+    # If file doesn't have custom steps yet, add them
+    if 'custom_steps' not in file:
+        file['custom_steps'] = file_steps
+
+    # Get status for each step
+    step_statuses = {}
+    for step in file_steps:
+        step_data = {
+            'status': 'Not Started',
+            'last_update': None,
+            'user': None
+        }
+
+        # Check file history for this step
+        for entry in file['history']:
+            if entry['step'] == step:
+                if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
+                    step_data['last_update'] = entry['timestamp']
+                    step_data['user'] = entry['user']
+                    step_data['status'] = 'Completed'
+
+        # Current step is in progress
+        if file['current_step'] == step and step_data['status'] != 'Completed':
+            step_data['status'] = 'In Progress'
+
+        step_statuses[step] = step_data
+
+    # Get available steps that aren't already in the file's steps
+    available_steps = [step for step in steps if step not in file_steps]
+
+    return render_template('manage_file_steps.html',
+                          file=file,
+                          file_id=file_id,
+                          file_steps=file_steps,
+                          step_statuses=step_statuses,
+                          available_steps=available_steps,
+                          username=session['username'],
+                          is_admin=users_db.get(session['username'], {}).get('is_admin', False))
+
+@app.route('/add_file_step/<file_id>', methods=['POST'])
+def add_file_step(file_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    if file_id not in files_db:
+        flash('File not found')
+        return redirect(url_for('index'))
+
+    step_name = request.form.get('step_name', '').strip().lower()
+    step_position = request.form.get('step_position', 'end')
+
+    if not step_name:
+        flash('Step name cannot be empty')
+        return redirect(url_for('manage_file_steps', file_id=file_id))
+
+    file = files_db[file_id]
+
+    # Ensure file has custom_steps
+    if 'custom_steps' not in file:
+        file['custom_steps'] = steps.copy()
+
+    # Check if step already exists in file's steps
+    if step_name in file['custom_steps']:
+        flash(f'Step "{step_name}" already exists in this file')
+        return redirect(url_for('manage_file_steps', file_id=file_id))
+
+    # Add step at specified position
+    if step_position == 'start':
+        file['custom_steps'].insert(0, step_name)
+    elif step_position == 'end':
+        file['custom_steps'].append(step_name)
+    elif step_position.startswith('after_'):
+        after_step = step_position[6:]
+        if after_step in file['custom_steps']:
+            index = file['custom_steps'].index(after_step)
+            file['custom_steps'].insert(index + 1, step_name)
+        else:
+            file['custom_steps'].append(step_name)
+
+    flash(f'Step "{step_name}" added successfully')
+    return redirect(url_for('manage_file_steps', file_id=file_id))
+
+@app.route('/rename_file_step/<file_id>', methods=['POST'])
+def rename_file_step(file_id):
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    data = request.json
+    old_step = data.get('old_step')
+    new_step = data.get('new_step', '').strip().lower()
+
+    if not old_step or not new_step:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    file = files_db[file_id]
+
+    # Ensure file has custom_steps
+    if 'custom_steps' not in file:
+        file['custom_steps'] = steps.copy()
+
+    if old_step not in file['custom_steps']:
+        return jsonify({"success": False, "message": f"Step '{old_step}' not found in this file"}), 404
+
+    if new_step in file['custom_steps']:
+        return jsonify({"success": False, "message": f"Step '{new_step}' already exists in this file"}), 400
+
+    # Rename step in file's steps list
+    index = file['custom_steps'].index(old_step)
+    file['custom_steps'][index] = new_step
+
+    # Update current step if needed
+    if file['current_step'] == old_step:
+        file['current_step'] = new_step
+
+    # Update history entries for this file
+    for entry in file['history']:
+        if entry['step'] == old_step:
+            entry['step'] = new_step
+
+    return jsonify({"success": True})
+
+@app.route('/remove_file_step/<file_id>', methods=['POST'])
+def remove_file_step(file_id):
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    data = request.json
+    step = data.get('step')
+
+    if not step:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    file = files_db[file_id]
+
+    # Ensure file has custom_steps
+    if 'custom_steps' not in file:
+        file['custom_steps'] = steps.copy()
+
+    if step not in file['custom_steps']:
+        return jsonify({"success": False, "message": f"Step '{step}' not found in this file"}), 404
+
+    # Check if this is the current step
+    if file['current_step'] == step:
+        return jsonify({"success": False, "message": f"Cannot remove step '{step}' because it is the current step"}), 400
+
+    # Check if this step has completed status
+    has_completed = False
+    for entry in file['history']:
+        if entry['step'] == step:
+            has_completed = True
+            break
+
+    if has_completed:
+        return jsonify({"success": False, "message": f"Cannot remove step '{step}' because it has completed entries"}), 400
+
+    # Remove step from file's steps list
+    file['custom_steps'].remove(step)
+
+    return jsonify({"success": True})
+
+@app.route('/move_file_step/<file_id>', methods=['POST'])
+def move_file_step(file_id):
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    data = request.json
+    step = data.get('step')
+    direction = data.get('direction')
+
+    if not step or not direction:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    file = files_db[file_id]
+
+    # Ensure file has custom_steps
+    if 'custom_steps' not in file:
+        file['custom_steps'] = steps.copy()
+
+    if step not in file['custom_steps']:
+        return jsonify({"success": False, "message": f"Step '{step}' not found in this file"}), 404
+
+    index = file['custom_steps'].index(step)
+
+    if direction == 'up':
+        if index == 0:
+            return jsonify({"success": False, "message": "Step is already at the top"}), 400
+        file['custom_steps'][index], file['custom_steps'][index-1] = file['custom_steps'][index-1], file['custom_steps'][index]
+    elif direction == 'down':
+        if index == len(file['custom_steps']) - 1:
+            return jsonify({"success": False, "message": "Step is already at the bottom"}), 400
+        file['custom_steps'][index], file['custom_steps'][index+1] = file['custom_steps'][index+1], file['custom_steps'][index]
+    else:
+        return jsonify({"success": False, "message": "Invalid direction"}), 400
+
+    return jsonify({"success": True})
+
+@app.route('/reset_file_steps/<file_id>')
+def reset_file_steps(file_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    if file_id not in files_db:
+        flash('File not found')
+        return redirect(url_for('index'))
+
+    # Reset to default steps
+    files_db[file_id]['custom_steps'] = steps.copy()
+
+    flash('Process steps have been reset to the default')
+    return redirect(url_for('manage_file_steps', file_id=file_id))
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage File Steps - {{ file.supplier }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="header">
+        <h1>File Processing Pipeline</h1>
+        <div class="user-info">
+            <span>Welcome, {{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
+            {% if is_admin %}
+            <a href="{{ url_for('register') }}" class="btn btn-small">Register User</a>
+            <a href="{{ url_for('manage_steps') }}" class="btn btn-small">Manage Steps</a>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    
+    <div class="container">
+        <div class="actions-bar">
+            <h2>Manage Process Steps for {{ file.supplier }} - {{ file.original_filename }}</h2>
+            <div>
+                <a href="{{ url_for('file_pipeline', file_id=file_id) }}" class="btn btn-secondary">Back to Pipeline</a>
+                <button id="add-step-btn" class="btn">Add Step</button>
+                <button id="reset-steps-btn" class="btn btn-danger">Reset to Default</button>
+            </div>
+        </div>
+        
+        <div class="file-info">
+            <p><strong>File ID:</strong> {{ file_id }}</p>
+            <p><strong>Current Step:</strong> {{ file.current_step|capitalize }}</p>
+            <p><strong>Last Update:</strong> 
+                {% if file.history|length > 0 %}
+                    {{ file.history[-1].timestamp }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </p>
+        </div>
+        
+        <div class="warning-box">
+            <p><strong>Warning:</strong> Changing the process steps will affect how this file progresses through the system. 
+            Be careful when removing steps, especially if they contain uploaded files.</p>
+        </div>
+        
+        <div class="table-container">
+            <table class="steps-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Step Name</th>
+                        <th>Status</th>
+                        <th>Files</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="steps-tbody">
+                    {% for step in file_steps %}
+                    <tr data-step="{{ step }}">
+                        <td>{{ loop.index }}</td>
+                        <td>
+                            <span class="step-name">{{ step|capitalize }}</span>
+                            <input type="text" class="step-edit-input hidden" value="{{ step }}">
+                        </td>
+                        <td class="status-{{ step_statuses[step].status|lower|replace(' ', '-') }}">
+                            {{ step_statuses[step].status }}
+                        </td>
+                        <td>
+                            {% set file_count = 0 %}
+                            {% for entry in file.history %}
+                                {% if entry.step == step and entry.path %}
+                                    {% set file_count = file_count + 1 %}
+                                {% endif %}
+                            {% endfor %}
+                            {{ file_count }}
+                        </td>
+                        <td>
+                            <button class="btn btn-small edit-step-btn">Edit</button>
+                            <button class="btn btn-small save-step-btn hidden">Save</button>
+                            <button class="btn btn-small cancel-step-btn hidden">Cancel</button>
+                            <button class="btn btn-small btn-danger remove-step-btn" {% if step == file.current_step or step_statuses[step].status == 'Completed' %}disabled{% endif %}>Remove</button>
+                            {% if not loop.first %}
+                            <button class="btn btn-small move-up-btn">↑</button>
+                            {% endif %}
+                            {% if not loop.last %}
+                            <button class="btn btn-small move-down-btn">↓</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Add Step Modal -->
+        <div id="add-step-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Add New Process Step</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="add-step-form" action="{{ url_for('add_file_step', file_id=file_id) }}" method="post">
+                        <div class="form-group">
+                            <label for="step_name">Step Name:</label>
+                            <input type="text" id="step_name" name="step_name" required>
+                            <!-- <select id="step_name" name="step_name">
+                                {% for step in available_steps %}
+                                <option value="{{ step }}">{{ step|capitalize }}</option>
+                                {% endfor %}
+                            </select>-->
+                        </div>
+                        <div class="form-group">
+                            <label for="step_position">Position:</label>
+                            <select id="step_position" name="step_position">
+                                <option value="start">At the beginning</option>
+                                <option value="end" selected>At the end</option>
+                                {% for step in file_steps %}
+                                <option value="after_{{ step }}">After {{ step|capitalize }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn">Add Step</button>
+                            <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Add step modal
+        const addStepModal = document.getElementById('add-step-modal');
+        const addStepBtn = document.getElementById('add-step-btn');
+        
+        addStepBtn.addEventListener('click', function() {
+            addStepModal.classList.remove('hidden');
+        });
+        
+        document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
+            element.addEventListener('click', function() {
+                addStepModal.classList.add('hidden');
+            });
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', function(event) {
+            if (event.target === addStepModal) {
+                addStepModal.classList.add('hidden');
+            }
+        });
+        
+        // Reset steps to default
+        document.getElementById('reset-steps-btn').addEventListener('click', function() {
+            if (confirm('Are you sure you want to reset the steps to the default process? This action cannot be undone.')) {
+                window.location.href = "{{ url_for('reset_file_steps', file_id=file_id) }}";
+            }
+        });
+        
+        // Edit step name
+        document.querySelectorAll('.edit-step-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const row = this.closest('tr');
+                row.querySelector('.step-name').classList.add('hidden');
+                row.querySelector('.step-edit-input').classList.remove('hidden');
+                row.querySelector('.edit-step-btn').classList.add('hidden');
+                row.querySelector('.save-step-btn').classList.remove('hidden');
+                row.querySelector('.cancel-step-btn').classList.remove('hidden');
+            });
+        });
+        
+        // Cancel edit
+        document.querySelectorAll('.cancel-step-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const row = this.closest('tr');
+                row.querySelector('.step-name').classList.remove('hidden');
+                row.querySelector('.step-edit-input').classList.add('hidden');
+                row.querySelector('.edit-step-btn').classList.remove('hidden');
+                row.querySelector('.save-step-btn').classList.add('hidden');
+                row.querySelector('.cancel-step-btn').classList.add('hidden');
+                
+                // Reset input value to original
+                const originalName = row.querySelector('.step-name').textContent;
+                row.querySelector('.step-edit-input').value = originalName;
+            });
+        });
+        
+        // Save step name
+        document.querySelectorAll('.save-step-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const row = this.closest('tr');
+                const oldStep = row.getAttribute('data-step');
+                const newStep = row.querySelector('.step-edit-input').value.trim();
+                
+                if (newStep === '') {
+                    alert('Step name cannot be empty');
+                    return;
+                }
+                
+                // Send update to server
+                fetch('/rename_file_step/{{ file_id }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        old_step: oldStep,
+                        new_step: newStep
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update UI
+                        row.setAttribute('data-step', newStep);
+                        row.querySelector('.step-name').textContent = newStep.charAt(0).toUpperCase() + newStep.slice(1);
+                        row.querySelector('.step-name').classList.remove('hidden');
+                        row.querySelector('.step-edit-input').classList.add('hidden');
+                        row.querySelector('.edit-step-btn').classList.remove('hidden');
+                        row.querySelector('.save-step-btn').classList.add('hidden');
+                        row.querySelector('.cancel-step-btn').classList.add('hidden');
+                        
+                        // Show success message
+                        alert('Step renamed successfully');
+                    } else {
+                        alert('Failed to rename step: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while renaming the step');
+                });
+            });
+        });
+        
+        // Remove step
+        document.querySelectorAll('.remove-step-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                if (this.disabled) {
+                    alert('Cannot remove the current step or a step with completed status.');
+                    return;
+                }
+                
+                const row = this.closest('tr');
+                const step = row.getAttribute('data-step');
+                
+                if (confirm(`Are you sure you want to remove the step "${step}"? This action cannot be undone.`)) {
+                    // Send delete request to server
+                    fetch('/remove_file_step/{{ file_id }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            step: step
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Remove row from table
+                            row.remove();
+                            alert('Step removed successfully');
+                            
+                            // Reload page to update order numbers
+                            window.location.reload();
+                        } else {
+                            alert('Failed to remove step: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while removing the step');
+                    });
+                }
+            });
+        });
+        
+        // Move step up/down
+        document.querySelectorAll('.move-up-btn, .move-down-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const row = this.closest('tr');
+                const step = row.getAttribute('data-step');
+                const direction = this.classList.contains('move-up-btn') ? 'up' : 'down';
+                
+                fetch('/move_file_step/{{ file_id }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        step: step,
+                        direction: direction
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Failed to move step: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while moving the step');
+                });
+            });
+        });
+    </script>
+</body>
+</html>
