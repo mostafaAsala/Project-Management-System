@@ -27,139 +27,118 @@
     {% endwith %}
 
     <div class="container">
-        <h2>Process Overview</h2>
+        <div class="actions-bar">
+            <h2>Files Overview</h2>
+            <button id="upload-new-btn" class="btn">Upload New File</button>
+        </div>
+
+        <div id="upload-form-container" class="hidden modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Upload New File</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+                    <div class="form-group">
+                        <label for="supplier">Supplier:</label>
+                        <input type="text" id="supplier" name="supplier" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="step">Initial Step:</label>
+                        <select id="step" name="step">
+                            {% for step in steps %}
+                            <option value="{{ step }}">{{ step|capitalize }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="file_id">File ID (for existing file):</label>
+                        <input type="text" id="file_id" name="file_id" placeholder="Leave empty for new file">
+                    </div>
+                    <div class="form-group">
+                        <label for="file">File:</label>
+                        <input type="file" id="file" name="file" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn">Upload</button>
+                        <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div class="table-container">
-            <table class="process-table">
+            <table class="files-table">
                 <thead>
                     <tr>
-                        <th>Step</th>
-                        <th>Status</th>
+                        <th>Supplier</th>
+                        <th>Filename</th>
+                        <th>Current Step</th>
                         <th>Last Update</th>
-                        <th>Assigned Users</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for step_data in process_overview %}
+                    {% for file_id, file in files.items() %}
                     <tr>
-                        <td>{{ step_data.name|capitalize }}</td>
-                        <td class="status-{{ step_data.status|lower|replace(' ', '-') }}">{{ step_data.status }}</td>
-                        <td>{{ step_data.last_update|default('Never', true) }}</td>
-                        <td>{{ step_data.assigned_users|join(', ') }}</td>
+                        <td>{{ file.supplier }}</td>
+                        <td>{{ file.original_filename }}</td>
+                        <td>{{ file.current_step|capitalize }}</td>
                         <td>
-                            {% if step_data.can_edit %}
-                            <button class="btn btn-small upload-btn" data-step="{{ step_data.name }}">Upload</button>
+                            {% if file.history|length > 0 %}
+                                {{ file.history[-1].timestamp }}
                             {% else %}
-                            <span class="disabled-text">Cannot Edit</span>
+                                N/A
                             {% endif %}
                         </td>
+                        <td>
+                            {% set current_step = file.current_step %}
+                            {% set step_completed = false %}
+                            {% for entry in file.history %}
+                                {% if entry.step == current_step %}
+                                    {% set step_completed = true %}
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if step_completed %}
+                                <span class="status-completed">Completed</span>
+                            {% else %}
+                                <span class="status-in-progress">In Progress</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('file_pipeline', file_id=file_id) }}" class="btn btn-small">View Pipeline</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="no-data">No files in process.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-
-        <div id="upload-form-container" class="hidden">
-            <h2>Upload New File</h2>
-            <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
-                <div class="form-group">
-                    <label for="supplier">Supplier:</label>
-                    <input type="text" id="supplier" name="supplier" required>
-                </div>
-                <div class="form-group">
-                    <label for="step">Step:</label>
-                    <select id="step" name="step">
-                        {% for step in steps %}
-                        <option value="{{ step }}">{{ step|capitalize }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="file_id">File ID (for existing file):</label>
-                    <input type="text" id="file_id" name="file_id" placeholder="Leave empty for new file">
-                </div>
-                <div class="form-group">
-                    <label for="file">File:</label>
-                    <input type="file" id="file" name="file" required>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn">Upload</button>
-                    <button type="button" class="btn btn-secondary" id="cancel-upload">Cancel</button>
-                </div>
-            </form>
-        </div>
-
-        <h2>Files in Process</h2>
-        <div class="files-container">
-            {% for file_id, file in files.items() %}
-            <div class="file-card">
-                <h3>{{ file.supplier }} - {{ file.original_filename }}</h3>
-                <p>File ID: {{ file_id }}</p>
-                <p>Current Step: {{ file.current_step|capitalize }}</p>
-
-                <div class="steps">
-                    {% for step in steps %}
-                        {% set step_completed = false %}
-                        {% for entry in file.history %}
-                            {% if entry.step == step %}
-                                {% set step_completed = true %}
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if step == file.current_step %}
-                            <div class="step current-step">{{ step|capitalize }}</div>
-                        {% elif step_completed %}
-                            <div class="step completed-step">{{ step|capitalize }}</div>
-                        {% else %}
-                            <div class="step pending-step">{{ step|capitalize }}</div>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-
-                <h4>History</h4>
-                <div class="history-container">
-                    <table class="history-table">
-                        <thead>
-                            <tr>
-                                <th>Step</th>
-                                <th>Timestamp</th>
-                                <th>User</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for entry in file.history %}
-                            <tr>
-                                <td>{{ entry.step|capitalize }}</td>
-                                <td>{{ entry.timestamp }}</td>
-                                <td>{{ entry.user }}</td>
-                                <td>
-                                    <a href="{{ url_for('download_file', file_id=file_id, step=entry.step) }}" class="btn btn-small">Download</a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            {% else %}
-            <p>No files in process.</p>
-            {% endfor %}
-        </div>
     </div>
 
     <script>
         // Show/hide upload form
-        document.querySelectorAll('.upload-btn').forEach(button => {
-            button.addEventListener('click', function() {
-                const step = this.getAttribute('data-step');
-                document.getElementById('step').value = step;
-                document.getElementById('upload-form-container').classList.remove('hidden');
+        document.getElementById('upload-new-btn').addEventListener('click', function() {
+            document.getElementById('upload-form-container').classList.remove('hidden');
+        });
+
+        document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
+            element.addEventListener('click', function() {
+                document.getElementById('upload-form-container').classList.add('hidden');
             });
         });
 
-        document.getElementById('cancel-upload').addEventListener('click', function() {
-            document.getElementById('upload-form-container').classList.add('hidden');
+        // Close modal when clicking outside
+        window.addEventListener('click', function(event) {
+            const modal = document.getElementById('upload-form-container');
+            if (event.target === modal) {
+                modal.classList.add('hidden');
+            }
         });
     </script>
 </body>

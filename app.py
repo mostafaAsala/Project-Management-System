@@ -42,34 +42,52 @@ def index():
     if 'username' not in session:
         return redirect(url_for('login'))
 
-    # Get process overview data
-    process_overview = []
-    for step in steps:
-        step_data = {
-            'name': step,
-            'status': 'Not Started',
-            'last_update': None,
-            'assigned_users': step_assignments[step],
-            'can_edit': is_authorized_for_step(session['username'], step)
-        }
-
-        # Check if any files are at this step
-        for file_id, file in files_db.items():
-            for entry in file['history']:
-                if entry['step'] == step:
-                    if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
-                        step_data['last_update'] = entry['timestamp']
-                        step_data['status'] = 'Completed'
-
-            if file['current_step'] == step:
-                step_data['status'] = 'In Progress'
-
-        process_overview.append(step_data)
-
     return render_template('index.html',
                           files=files_db,
                           steps=steps,
-                          process_overview=process_overview,
+                          username=session['username'],
+                          is_admin=users_db.get(session['username'], {}).get('is_admin', False))
+
+@app.route('/file/<file_id>')
+def file_pipeline(file_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    if file_id not in files_db:
+        flash('File not found')
+        return redirect(url_for('index'))
+
+    file = files_db[file_id]
+
+    # Get status for each step in the pipeline
+    step_statuses = {}
+    for step in steps:
+        step_data = {
+            'status': 'Not Started',
+            'last_update': None,
+            'user': None,
+            'can_edit': is_authorized_for_step(session['username'], step)
+        }
+
+        # Check file history for this step
+        for entry in file['history']:
+            if entry['step'] == step:
+                if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
+                    step_data['last_update'] = entry['timestamp']
+                    step_data['user'] = entry['user']
+                    step_data['status'] = 'Completed'
+
+        # Current step is in progress
+        if file['current_step'] == step and step_data['status'] != 'Completed':
+            step_data['status'] = 'In Progress'
+
+        step_statuses[step] = step_data
+
+    return render_template('file_pipeline.html',
+                          file=file,
+                          file_id=file_id,
+                          steps=steps,
+                          step_statuses=step_statuses,
                           username=session['username'],
                           is_admin=users_db.get(session['username'], {}).get('is_admin', False))
 
@@ -201,6 +219,69 @@ def get_files():
     if 'username' not in session:
         return jsonify({"error": "Not authenticated"}), 401
     return jsonify(files_db)
+
+@app.route('/api/file_versions/<file_id>/<step>')
+def get_file_versions(file_id, step):
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if file_id not in files_db:
+        return jsonify({"error": "File not found"}), 404
+
+    versions = []
+    for entry in files_db[file_id]['history']:
+        if entry['step'] == step:
+            versions.append({
+                'file_id': file_id,
+                'step': step,
+                'filename': entry['filename'],
+                'timestamp': entry['timestamp'],
+                'user': entry['user']
+            })
+
+    return jsonify({"versions": versions})
+
+@app.route('/update_status', methods=['POST'])
+def update_status():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    data = request.json
+    file_id = data.get('file_id')
+    step = data.get('step')
+    status = data.get('status')
+
+    if not all([file_id, step, status]):
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    if step not in steps:
+        return jsonify({"success": False, "message": "Invalid step"}), 400
+
+    if not is_authorized_for_step(session['username'], step):
+        return jsonify({"success": False, "message": "Not authorized to update this step"}), 403
+
+    # Update the file status
+    if status == 'Completed' or status == 'In Progress':
+        # Add a status update entry to history
+        timestamp = datetime.now().isoformat()
+        files_db[file_id]['history'].append({
+            'step': step,
+            'timestamp': timestamp,
+            'filename': f"Status update to {status}",
+            'path': None,  # No file for status updates
+            'user': session['username']
+        })
+
+        # If completed, move to next step
+        if status == 'Completed' and files_db[file_id]['current_step'] == step:
+            current_index = steps.index(step)
+            if current_index < len(steps) - 1:
+                files_db[file_id]['current_step'] = steps[current_index + 1]
+
+    return jsonify({"success": True})
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Pipeline - {{ file.supplier }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="header">
+        <h1>File Processing Pipeline</h1>
+        <div class="user-info">
+            <span>Welcome, {{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
+            {% if is_admin %}
+            <a href="{{ url_for('register') }}" class="btn btn-small">Register User</a>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    
+    <div class="container">
+        <div class="actions-bar">
+            <h2>Pipeline for {{ file.supplier }} - {{ file.original_filename }}</h2>
+            <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Overview</a>
+        </div>
+        
+        <div class="file-info">
+            <p><strong>File ID:</strong> {{ file_id }}</p>
+            <p><strong>Current Step:</strong> {{ file.current_step|capitalize }}</p>
+            <p><strong>Last Update:</strong> 
+                {% if file.history|length > 0 %}
+                    {{ file.history[-1].timestamp }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </p>
+        </div>
+        
+        <div class="pipeline-container">
+            {% for step in steps %}
+                {% set step_data = step_statuses[step] %}
+                <div class="pipeline-step {% if step == file.current_step %}current{% endif %}">
+                    <div class="pipeline-card">
+                        <h3>{{ step|capitalize }}</h3>
+                        <div class="status-indicator status-{{ step_data.status|lower|replace(' ', '-') }}">
+                            {{ step_data.status }}
+                        </div>
+                        <div class="card-details">
+                            <p><strong>Last Update:</strong> {{ step_data.last_update|default('Never', true) }}</p>
+                            <p><strong>Updated By:</strong> {{ step_data.user|default('N/A', true) }}</p>
+                        </div>
+                        <div class="card-actions">
+                            {% if step_data.can_edit %}
+                            <select class="status-select" data-step="{{ step }}" data-file-id="{{ file_id }}">
+                                <option value="Not Started" {% if step_data.status == 'Not Started' %}selected{% endif %}>Not Started</option>
+                                <option value="In Progress" {% if step_data.status == 'In Progress' %}selected{% endif %}>In Progress</option>
+                                <option value="Completed" {% if step_data.status == 'Completed' %}selected{% endif %}>Completed</option>
+                            </select>
+                            {% endif %}
+                            <button class="btn btn-small download-btn" data-step="{{ step }}">Download</button>
+                        </div>
+                    </div>
+                    {% if not loop.last %}
+                    <div class="pipeline-arrow">
+                        <svg width="50" height="20" viewBox="0 0 50 20">
+                            <path d="M0,10 L40,10 M35,5 L45,10 L35,15" stroke="#666" stroke-width="2" fill="none" />
+                        </svg>
+                    </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+        
+        <!-- Download Modal -->
+        <div id="download-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Download Files</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p>Select a file version to download:</p>
+                    <div id="download-files-list">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Status change handling
+        document.querySelectorAll('.status-select').forEach(select => {
+            select.addEventListener('change', function() {
+                const step = this.getAttribute('data-step');
+                const fileId = this.getAttribute('data-file-id');
+                const status = this.value;
+                
+                fetch('/update_status', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        file_id: fileId,
+                        step: step,
+                        status: status
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update UI to reflect the change
+                        const statusIndicator = this.closest('.pipeline-card').querySelector('.status-indicator');
+                        statusIndicator.className = `status-indicator status-${status.toLowerCase().replace(' ', '-')}`;
+                        statusIndicator.textContent = status;
+                        
+                        // Show success message
+                        alert('Status updated successfully');
+                    } else {
+                        alert('Failed to update status: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while updating the status');
+                });
+            });
+        });
+        
+        // Download modal handling
+        const downloadModal = document.getElementById('download-modal');
+        const downloadFilesList = document.getElementById('download-files-list');
+        
+        document.querySelectorAll('.download-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const step = this.getAttribute('data-step');
+                
+                // Fetch file versions for this step
+                fetch(`/api/file_versions/{{ file_id }}/${step}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Clear previous list
+                    downloadFilesList.innerHTML = '';
+                    
+                    if (data.versions && data.versions.length > 0) {
+                        // Create list of file versions
+                        data.versions.forEach(version => {
+                            const item = document.createElement('div');
+                            item.className = 'download-item';
+                            item.innerHTML = `
+                                <div class="download-info">
+                                    <p><strong>Filename:</strong> ${version.filename}</p>
+                                    <p><strong>Uploaded:</strong> ${version.timestamp}</p>
+                                    <p><strong>User:</strong> ${version.user}</p>
+                                </div>
+                                <a href="/download/${version.file_id}/${version.step}" class="btn btn-small">Download</a>
+                            `;
+                            downloadFilesList.appendChild(item);
+                        });
+                    } else {
+                        downloadFilesList.innerHTML = '<p>No files available for this step.</p>';
+                    }
+                    
+                    // Show the modal
+                    downloadModal.classList.remove('hidden');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while fetching file versions');
+                });
+            });
+        });
+        
+        // Close modal
+        document.querySelectorAll('.close-modal').forEach(element => {
+            element.addEventListener('click', function() {
+                downloadModal.classList.add('hidden');
+            });
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', function(event) {
+            if (event.target === downloadModal) {
+                downloadModal.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
