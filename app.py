@@ -6,6 +6,8 @@ from datetime import datetime
 import uuid
 import json
 import copy
+import atexit
+import data_manager
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -13,24 +15,18 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 app.secret_key = os.urandom(24)  # For session management
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Simple in-memory database for demonstration
-files_db = {}
-users_db = {
-    'admin': {
-        'password': generate_password_hash('admin'),
-        'assigned_steps': ['intake', 'processing', 'validation', 'approval', 'final'],
-        'is_admin': True,
-        'roles': ['intake', 'processing', 'validation', 'approval', 'final']  # Global roles for new files
-    }
-}
-steps = ["intake", "processing", "validation", "approval", "final"]
-step_assignments = {
-    'intake': ['admin'],
-    'processing': ['admin'],
-    'validation': ['admin'],
-    'approval': ['admin'],
-    'final': ['admin']
-}
+# Load data from files
+users_db, files_db, steps, step_assignments = data_manager.load_data()
+
+# Start auto-save
+data_manager.start_auto_save(users_db, files_db, steps, step_assignments, interval=30)
+
+# Register function to save data when the application exits
+def save_data_on_exit():
+    data_manager.save_data(users_db, files_db, steps, step_assignments)
+    data_manager.stop_auto_save()
+
+atexit.register(save_data_on_exit)
 
 # Helper function to check if user is authorized for a step
 def is_authorized_for_step(username, step, file_id=None):
@@ -81,6 +77,8 @@ def update_current_step(file_id):
                 status = entry['filename'].replace('Status update to ', '')
                 step_statuses[entry['step']] = status
             elif entry.get('path'):  # If there's a file upload, mark as completed
+                step_statuses[entry['step']] = 'in progress'
+            else:
                 step_statuses[entry['step']] = 'Completed'
 
     # Find the first non-completed step
@@ -95,8 +93,10 @@ def update_current_step(file_id):
         next_step = file_steps[-1]
 
     # Update the current step
-    if next_step is not None:
+    if next_step is not None and file['current_step'] != next_step:
         file['current_step'] = next_step
+        # Mark data as changed
+        data_manager.mark_data_changed()
 
 @app.route('/')
 def index():
@@ -168,6 +168,9 @@ def add_step():
     # Update user assignments for admin
     users_db['admin']['assigned_steps'].append(step_name)
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     flash(f'Step "{step_name}" added successfully')
     return redirect(url_for('manage_steps'))
 
@@ -216,6 +219,9 @@ def rename_step():
             if entry.get('step') == old_step:
                 entry['step'] = new_step
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 @app.route('/remove_step', methods=['POST'])
@@ -255,6 +261,9 @@ def remove_step():
 
     # Remove step from file history (but keep the entries for record)
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 @app.route('/move_step', methods=['POST'])
@@ -289,6 +298,9 @@ def move_step():
     else:
         return jsonify({"success": False, "message": "Invalid direction"}), 400
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 @app.route('/file/<file_id>')
@@ -304,7 +316,7 @@ def file_pipeline(file_id):
 
     # Use file's custom steps if available, otherwise use default steps
     file_steps = file.get('custom_steps', steps)
-
+    print(file_steps)
     # Ensure file has step_assignments
     if 'step_assignments' not in file:
         file['step_assignments'] = {}
@@ -330,7 +342,7 @@ def file_pipeline(file_id):
                 if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
                     step_data['last_update'] = entry['timestamp']
                     step_data['user'] = entry['user']
-                    step_data['status'] = 'Completed'
+                    step_data['status'] = 'In Progress'
 
         # Current step is in progress
         if file['current_step'] == step and step_data['status'] != 'Completed':
@@ -411,6 +423,9 @@ def register():
                         if username not in file['step_assignments'][s]:
                             file['step_assignments'][s].append(username)
 
+            # Mark data as changed
+            data_manager.mark_data_changed()
+
             flash('User registered successfully')
             return redirect(url_for('index'))
 
@@ -478,6 +493,9 @@ def upload_file():
 
     files_db[file_id]['current_step'] = step
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     flash('File uploaded successfully')
     return redirect(url_for('index'))
 
@@ -532,6 +550,9 @@ def upload_to_step():
 
     # Update the current step based on completed steps
     update_current_step(file_id)
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
 
     flash('File uploaded successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
@@ -631,6 +652,9 @@ def update_status():
             # Find the last completed step and set current step to the next one
             update_current_step(file_id)
 
+        # Mark data as changed
+        data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 # File-specific step management routes
@@ -727,6 +751,9 @@ def add_file_step(file_id):
         else:
             file['custom_steps'].append(step_name)
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     flash(f'Step "{step_name}" added successfully')
     return redirect(url_for('manage_file_steps', file_id=file_id))
 
@@ -770,6 +797,9 @@ def rename_file_step(file_id):
         if entry['step'] == old_step:
             entry['step'] = new_step
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 @app.route('/remove_file_step/<file_id>', methods=['POST'])
@@ -812,6 +842,9 @@ def remove_file_step(file_id):
     # Remove step from file's steps list
     file['custom_steps'].remove(step)
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 @app.route('/move_file_step/<file_id>', methods=['POST'])
@@ -851,6 +884,9 @@ def move_file_step(file_id):
     else:
         return jsonify({"success": False, "message": "Invalid direction"}), 400
 
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
     return jsonify({"success": True})
 
 @app.route('/reset_file_steps/<file_id>')
@@ -864,6 +900,9 @@ def reset_file_steps(file_id):
 
     # Reset to default steps
     files_db[file_id]['custom_steps'] = steps.copy()
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
 
     flash('Process steps have been reset to the default')
     return redirect(url_for('manage_file_steps', file_id=file_id))
@@ -943,6 +982,9 @@ def manage_step_users(file_id):
 
     # Update step assignments
     file['step_assignments'][step] = assigned_users
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
 
     flash(f'Users for step "{step}" updated successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
