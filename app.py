@@ -19,7 +19,8 @@ users_db = {
     'admin': {
         'password': generate_password_hash('admin'),
         'assigned_steps': ['intake', 'processing', 'validation', 'approval', 'final'],
-        'is_admin': True
+        'is_admin': True,
+        'roles': ['intake', 'processing', 'validation', 'approval', 'final']  # Global roles for new files
     }
 }
 steps = ["intake", "processing", "validation", "approval", "final"]
@@ -32,12 +33,22 @@ step_assignments = {
 }
 
 # Helper function to check if user is authorized for a step
-def is_authorized_for_step(username, step):
+def is_authorized_for_step(username, step, file_id=None):
     if username not in users_db:
         return False
+
+    # Admins are authorized for all steps
     if users_db[username].get('is_admin', False):
         return True
-    return step in users_db[username].get('assigned_steps', [])
+
+    # If file_id is provided, check file-specific step assignments
+    if file_id and file_id in files_db:
+        file = files_db[file_id]
+        if 'step_assignments' in file and step in file['step_assignments']:
+            return username in file['step_assignments'][step]
+
+    # Fall back to global roles if no file-specific assignment or not authorized
+    return step in users_db[username].get('roles', [])
 
 # Helper function to count files in each step
 def count_files_in_steps():
@@ -49,6 +60,43 @@ def count_files_in_steps():
             step_counts[current_step] += 1
 
     return step_counts
+
+# Helper function to update the current step based on completed steps
+def update_current_step(file_id):
+    if file_id not in files_db:
+        return
+
+    file = files_db[file_id]
+    file_steps = file.get('custom_steps', steps)
+
+    # Create a dictionary to track the status of each step
+    step_statuses = {}
+    for s in file_steps:
+        step_statuses[s] = 'Not Started'
+
+    # Update statuses based on history
+    for entry in file['history']:
+        if entry['step'] in step_statuses:
+            if entry.get('filename', '').startswith('Status update to '):
+                status = entry['filename'].replace('Status update to ', '')
+                step_statuses[entry['step']] = status
+            elif entry.get('path'):  # If there's a file upload, mark as completed
+                step_statuses[entry['step']] = 'Completed'
+
+    # Find the first non-completed step
+    next_step = None
+    for s in file_steps:
+        if step_statuses[s] != 'Completed':
+            next_step = s
+            break
+
+    # If all steps are completed, set to the last step
+    if next_step is None and file_steps:
+        next_step = file_steps[-1]
+
+    # Update the current step
+    if next_step is not None:
+        file['current_step'] = next_step
 
 @app.route('/')
 def index():
@@ -257,6 +305,15 @@ def file_pipeline(file_id):
     # Use file's custom steps if available, otherwise use default steps
     file_steps = file.get('custom_steps', steps)
 
+    # Ensure file has step_assignments
+    if 'step_assignments' not in file:
+        file['step_assignments'] = {}
+        for s in file_steps:
+            file['step_assignments'][s] = []
+            for username, user_data in users_db.items():
+                if s in user_data.get('roles', []):
+                    file['step_assignments'][s].append(username)
+
     # Get status for each step in the pipeline
     step_statuses = {}
     for step in file_steps:
@@ -264,7 +321,7 @@ def file_pipeline(file_id):
             'status': 'Not Started',
             'last_update': None,
             'user': None,
-            'can_edit': is_authorized_for_step(session['username'], step)
+            'can_edit': is_authorized_for_step(session['username'], step, file_id)
         }
 
         # Check file history for this step
@@ -317,7 +374,7 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        assigned_steps = request.form.getlist('assigned_steps')
+        assigned_roles = request.form.getlist('assigned_roles')  # These are global roles
         is_admin = 'is_admin' in request.form
 
         if username in users_db:
@@ -325,17 +382,34 @@ def register():
         else:
             users_db[username] = {
                 'password': generate_password_hash(password),
-                'assigned_steps': assigned_steps,
+                'assigned_steps': assigned_roles.copy(),  # For backward compatibility
+                'roles': assigned_roles,  # Global roles for new files
                 'is_admin': is_admin
             }
 
-            # Update step assignments
+            # Update global step assignments
             for step in steps:
-                if step in assigned_steps:
+                if step in assigned_roles:
                     if username not in step_assignments[step]:
                         step_assignments[step].append(username)
                 elif username in step_assignments[step]:
                     step_assignments[step].remove(username)
+
+            # Update file-specific step assignments for all existing files
+            for file_id, file in files_db.items():
+                if 'step_assignments' not in file:
+                    # Create step assignments if they don't exist
+                    file['step_assignments'] = {}
+                    for s in file.get('custom_steps', steps):
+                        file['step_assignments'][s] = []
+
+                # Add user to their assigned roles in each file
+                for s in file.get('custom_steps', steps):
+                    if s in assigned_roles:
+                        if s not in file['step_assignments']:
+                            file['step_assignments'][s] = []
+                        if username not in file['step_assignments'][s]:
+                            file['step_assignments'][s].append(username)
 
             flash('User registered successfully')
             return redirect(url_for('index'))
@@ -377,12 +451,21 @@ def upload_file():
         # Create a copy of the default steps for this file
         file_steps = steps.copy()
 
+        # Create file-specific step assignments based on global roles
+        file_step_assignments = {}
+        for s in file_steps:
+            file_step_assignments[s] = []
+            for username, user_data in users_db.items():
+                if s in user_data.get('roles', []):
+                    file_step_assignments[s].append(username)
+
         files_db[file_id] = {
             'supplier': supplier,
             'original_filename': filename,
-            'current_step': step,
+            'current_step': file_steps[0] if file_steps else step,  # Start with the first step by default
             'history': [],
-            'custom_steps': file_steps  # Add custom steps for this file
+            'custom_steps': file_steps,  # Add custom steps for this file
+            'step_assignments': file_step_assignments  # Add file-specific step assignments
         }
 
     files_db[file_id]['history'].append({
@@ -422,7 +505,7 @@ def upload_to_step():
         return redirect(url_for('index'))
 
     # Check if user is authorized for this step
-    if not is_authorized_for_step(session['username'], step):
+    if not is_authorized_for_step(session['username'], step, file_id):
         flash(f'You are not authorized to upload files for the {step} step')
         return redirect(url_for('file_pipeline', file_id=file_id))
 
@@ -447,15 +530,8 @@ def upload_to_step():
         'comment': comment
     })
 
-    # Update current step if this is the current step
-    if files_db[file_id]['current_step'] == step:
-        # Use file's custom steps if available
-        file_steps = files_db[file_id].get('custom_steps', steps)
-
-        # If the step is completed, move to the next step
-        current_index = file_steps.index(step)
-        if current_index < len(file_steps) - 1:
-            files_db[file_id]['current_step'] = file_steps[current_index + 1]
+    # Update the current step based on completed steps
+    update_current_step(file_id)
 
     flash('File uploaded successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
@@ -532,7 +608,7 @@ def update_status():
     if step not in file_steps:
         return jsonify({"success": False, "message": "Invalid step for this file"}), 400
 
-    if not is_authorized_for_step(session['username'], step):
+    if not is_authorized_for_step(session['username'], step, file_id):
         return jsonify({"success": False, "message": "Not authorized to update this step"}), 403
 
     # Update the file status
@@ -547,14 +623,13 @@ def update_status():
             'user': session['username']
         })
 
-        # If completed, move to next step
-        if status == 'Completed' and files_db[file_id]['current_step'] == step:
-            # Use file's custom steps if available
-            file_steps = files_db[file_id].get('custom_steps', steps)
+        # Get file's custom steps
+        file_steps = files_db[file_id].get('custom_steps', steps)
 
-            current_index = file_steps.index(step)
-            if current_index < len(file_steps) - 1:
-                files_db[file_id]['current_step'] = file_steps[current_index + 1]
+        # If status is completed, update the current step
+        if status == 'Completed':
+            # Find the last completed step and set current step to the next one
+            update_current_step(file_id)
 
     return jsonify({"success": True})
 
@@ -792,6 +867,85 @@ def reset_file_steps(file_id):
 
     flash('Process steps have been reset to the default')
     return redirect(url_for('manage_file_steps', file_id=file_id))
+
+@app.route('/api/step_users/<file_id>/<step>')
+def get_step_users(file_id, step):
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"error": "Only administrators can manage users"}), 403
+
+    if file_id not in files_db:
+        return jsonify({"error": "File not found"}), 404
+
+    file = files_db[file_id]
+
+    # Use file's custom steps if available
+    file_steps = file.get('custom_steps', steps)
+
+    if step not in file_steps:
+        return jsonify({"error": "Step not found"}), 404
+
+    # Ensure file has step_assignments
+    if 'step_assignments' not in file:
+        file['step_assignments'] = {}
+        for s in file_steps:
+            file['step_assignments'][s] = []
+            for username, user_data in users_db.items():
+                if s in user_data.get('roles', []):
+                    file['step_assignments'][s].append(username)
+
+    # If this step doesn't have assignments yet, initialize it
+    if step not in file['step_assignments']:
+        file['step_assignments'][step] = []
+
+    # Get all users and mark which ones are assigned to this step
+    users_list = []
+    for username, user_data in users_db.items():
+        users_list.append({
+            'username': username,
+            'assigned': username in file['step_assignments'].get(step, [])
+        })
+
+    return jsonify({"users": users_list})
+
+@app.route('/manage_step_users/<file_id>', methods=['POST'])
+def manage_step_users(file_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        flash('Only administrators can manage users')
+        return redirect(url_for('file_pipeline', file_id=file_id))
+
+    if file_id not in files_db:
+        flash('File not found')
+        return redirect(url_for('index'))
+
+    step = request.form.get('step')
+    assigned_users = request.form.getlist('assigned_users')
+
+    file = files_db[file_id]
+
+    # Use file's custom steps if available
+    file_steps = file.get('custom_steps', steps)
+
+    if step not in file_steps:
+        flash('Step not found')
+        return redirect(url_for('file_pipeline', file_id=file_id))
+
+    # Ensure file has step_assignments
+    if 'step_assignments' not in file:
+        file['step_assignments'] = {}
+
+    # Update step assignments
+    file['step_assignments'][step] = assigned_users
+
+    flash(f'Users for step "{step}" updated successfully')
+    return redirect(url_for('file_pipeline', file_id=file_id))
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -111,6 +111,13 @@ h1, h2, h3, h4 {
     gap: 5px;
 }
 
+.help-text {
+    font-size: 14px;
+    color: #7f8c8d;
+    margin-bottom: 10px;
+    font-style: italic;
+}
+
 /* Tables */
 .table-container {
     overflow-x: auto;
@@ -181,6 +188,51 @@ tr:hover {
 
 .file-info p:last-child {
     margin-bottom: 0;
+}
+
+.current-step-indicator {
+    font-weight: bold;
+    color: #3498db;
+    background-color: #eaf2fa;
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid #bde0ff;
+}
+
+/* Progress Bar */
+.progress-bar {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.progress-step {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: #ecf0f1;
+    border: 1px solid #bdc3c7;
+    position: relative;
+    cursor: pointer;
+}
+
+.progress-step.completed {
+    background-color: #2ecc71;
+    border-color: #27ae60;
+}
+
+.progress-step.current {
+    background-color: #3498db;
+    border-color: #2980b9;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.3);
+}
+
+.progress-text {
+    margin-left: 10px;
+    font-size: 14px;
+    color: #7f8c8d;
 }
 
 /* Pipeline Visualization */
@@ -268,6 +320,14 @@ tr:hover {
 
 .btn-upload:hover {
     background-color: #219955;
+}
+
+.manage-users-btn {
+    background-color: #9b59b6;
+}
+
+.manage-users-btn:hover {
+    background-color: #8e44ad;
 }
 
 textarea {

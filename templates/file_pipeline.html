@@ -37,13 +37,34 @@
 
         <div class="file-info">
             <p><strong>File ID:</strong> {{ file_id }}</p>
-            <p><strong>Current Step:</strong> {{ file.current_step|capitalize }}</p>
+            <p><strong>Current Step:</strong> <span class="current-step-indicator">{{ file.current_step|capitalize }}</span></p>
             <p><strong>Last Update:</strong>
                 {% if file.history|length > 0 %}
                     {{ file.history[-1].timestamp }}
                 {% else %}
                     N/A
                 {% endif %}
+            </p>
+            <p><strong>Process Progress:</strong>
+                <div class="progress-bar">
+                    {% set completed_count = 0 %}
+                    {% for step in steps %}
+                        {% set step_completed = false %}
+                        {% for entry in file.history %}
+                            {% if entry.step == step and (entry.path or entry.filename.startswith('Status update to Completed')) %}
+                                {% set step_completed = true %}
+                                {% set completed_count = completed_count + 1 %}
+                            {% endif %}
+                        {% endfor %}
+
+                        <div class="progress-step
+                            {% if step_completed %}completed{% endif %}
+                            {% if step == file.current_step %}current{% endif %}"
+                            title="{{ step|capitalize }}">
+                        </div>
+                    {% endfor %}
+                    <div class="progress-text">{{ completed_count }} of {{ steps|length }} steps completed</div>
+                </div>
             </p>
         </div>
 
@@ -60,6 +81,13 @@
                             <div class="card-details">
                                 <p><strong>Last Update:</strong> {{ step_data.last_update|default('Never', true) }}</p>
                                 <p><strong>Updated By:</strong> {{ step_data.user|default('N/A', true) }}</p>
+                                <p><strong>Assigned Users:</strong>
+                                    {% if file.step_assignments and step in file.step_assignments %}
+                                        {{ file.step_assignments[step]|join(', ')|default('None', true) }}
+                                    {% else %}
+                                        None
+                                    {% endif %}
+                                </p>
                             </div>
                             <div class="card-actions">
                                 {% if step_data.can_edit %}
@@ -71,6 +99,9 @@
                                 <button class="btn btn-small btn-upload upload-btn" data-step="{{ step }}" data-file-id="{{ file_id }}">Upload</button>
                                 {% endif %}
                                 <button class="btn btn-small download-btn" data-step="{{ step }}">Download</button>
+                                {% if is_admin %}
+                                <button class="btn btn-small manage-users-btn" data-step="{{ step }}">Users</button>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -191,6 +222,33 @@
                 </div>
             </div>
         </div>
+
+        <!-- Manage Users Modal -->
+        <div id="manage-users-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Manage Users for <span id="manage-users-step-name">Step</span></h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="manage-users-form" action="/manage_step_users/{{ file_id }}" method="post">
+                        <input type="hidden" id="manage-users-step" name="step">
+
+                        <div class="form-group">
+                            <label>Assigned Users:</label>
+                            <div class="checkbox-group" id="user-checkboxes">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn">Save Changes</button>
+                            <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -299,11 +357,58 @@
             });
         });
 
+        // Manage Users modal handling
+        const manageUsersModal = document.getElementById('manage-users-modal');
+        const manageUsersStepName = document.getElementById('manage-users-step-name');
+        const manageUsersStep = document.getElementById('manage-users-step');
+        const userCheckboxes = document.getElementById('user-checkboxes');
+
+        document.querySelectorAll('.manage-users-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const step = this.getAttribute('data-step');
+
+                // Set form values
+                manageUsersStepName.textContent = step.charAt(0).toUpperCase() + step.slice(1);
+                manageUsersStep.value = step;
+
+                // Fetch users for this step
+                fetch(`/api/step_users/{{ file_id }}/${step}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Clear previous checkboxes
+                    userCheckboxes.innerHTML = '';
+
+                    if (data.users && data.users.length > 0) {
+                        // Create checkboxes for each user
+                        data.users.forEach(user => {
+                            const checkbox = document.createElement('div');
+                            checkbox.className = 'checkbox-item';
+                            checkbox.innerHTML = `
+                                <input type="checkbox" id="user_${user.username}" name="assigned_users" value="${user.username}" ${user.assigned ? 'checked' : ''}>
+                                <label for="user_${user.username}">${user.username}</label>
+                            `;
+                            userCheckboxes.appendChild(checkbox);
+                        });
+                    } else {
+                        userCheckboxes.innerHTML = '<p>No users available.</p>';
+                    }
+
+                    // Show the modal
+                    manageUsersModal.classList.remove('hidden');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while fetching users');
+                });
+            });
+        });
+
         // Close modals
         document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
             element.addEventListener('click', function() {
                 downloadModal.classList.add('hidden');
                 uploadModal.classList.add('hidden');
+                manageUsersModal.classList.add('hidden');
             });
         });
 
@@ -314,6 +419,9 @@
             }
             if (event.target === uploadModal) {
                 uploadModal.classList.add('hidden');
+            }
+            if (event.target === manageUsersModal) {
+                manageUsersModal.classList.add('hidden');
             }
         });
     </script>
