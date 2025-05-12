@@ -15,7 +15,7 @@
             {% endif %}
         </div>
     </div>
-    
+
     {% with messages = get_flashed_messages() %}
     {% if messages %}
     <div class="flash-messages">
@@ -25,17 +25,17 @@
     </div>
     {% endif %}
     {% endwith %}
-    
+
     <div class="container">
         <div class="actions-bar">
             <h2>Pipeline for {{ file.supplier }} - {{ file.original_filename }}</h2>
             <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Overview</a>
         </div>
-        
+
         <div class="file-info">
             <p><strong>File ID:</strong> {{ file_id }}</p>
             <p><strong>Current Step:</strong> {{ file.current_step|capitalize }}</p>
-            <p><strong>Last Update:</strong> 
+            <p><strong>Last Update:</strong>
                 {% if file.history|length > 0 %}
                     {{ file.history[-1].timestamp }}
                 {% else %}
@@ -43,42 +43,105 @@
                 {% endif %}
             </p>
         </div>
-        
-        <div class="pipeline-container">
-            {% for step in steps %}
-                {% set step_data = step_statuses[step] %}
-                <div class="pipeline-step {% if step == file.current_step %}current{% endif %}">
-                    <div class="pipeline-card">
-                        <h3>{{ step|capitalize }}</h3>
-                        <div class="status-indicator status-{{ step_data.status|lower|replace(' ', '-') }}">
-                            {{ step_data.status }}
-                        </div>
-                        <div class="card-details">
-                            <p><strong>Last Update:</strong> {{ step_data.last_update|default('Never', true) }}</p>
-                            <p><strong>Updated By:</strong> {{ step_data.user|default('N/A', true) }}</p>
-                        </div>
-                        <div class="card-actions">
-                            {% if step_data.can_edit %}
-                            <select class="status-select" data-step="{{ step }}" data-file-id="{{ file_id }}">
-                                <option value="Not Started" {% if step_data.status == 'Not Started' %}selected{% endif %}>Not Started</option>
-                                <option value="In Progress" {% if step_data.status == 'In Progress' %}selected{% endif %}>In Progress</option>
-                                <option value="Completed" {% if step_data.status == 'Completed' %}selected{% endif %}>Completed</option>
-                            </select>
-                            {% endif %}
-                            <button class="btn btn-small download-btn" data-step="{{ step }}">Download</button>
+
+        <div class="pipeline-wrapper">
+            <div class="pipeline-container">
+                {% for step in steps %}
+                    {% set step_data = step_statuses[step] %}
+                    <div class="pipeline-step {% if step == file.current_step %}current{% endif %}" id="step-{{ loop.index }}">
+                        <div class="pipeline-card">
+                            <h3>{{ step|capitalize }}</h3>
+                            <div class="status-indicator status-{{ step_data.status|lower|replace(' ', '-') }}">
+                                {{ step_data.status }}
+                            </div>
+                            <div class="card-details">
+                                <p><strong>Last Update:</strong> {{ step_data.last_update|default('Never', true) }}</p>
+                                <p><strong>Updated By:</strong> {{ step_data.user|default('N/A', true) }}</p>
+                            </div>
+                            <div class="card-actions">
+                                {% if step_data.can_edit %}
+                                <select class="status-select" data-step="{{ step }}" data-file-id="{{ file_id }}">
+                                    <option value="Not Started" {% if step_data.status == 'Not Started' %}selected{% endif %}>Not Started</option>
+                                    <option value="In Progress" {% if step_data.status == 'In Progress' %}selected{% endif %}>In Progress</option>
+                                    <option value="Completed" {% if step_data.status == 'Completed' %}selected{% endif %}>Completed</option>
+                                </select>
+                                <button class="btn btn-small btn-upload upload-btn" data-step="{{ step }}" data-file-id="{{ file_id }}">Upload</button>
+                                {% endif %}
+                                <button class="btn btn-small download-btn" data-step="{{ step }}">Download</button>
+                            </div>
                         </div>
                     </div>
-                    {% if not loop.last %}
-                    <div class="pipeline-arrow">
-                        <svg width="50" height="20" viewBox="0 0 50 20">
-                            <path d="M0,10 L40,10 M35,5 L45,10 L35,15" stroke="#666" stroke-width="2" fill="none" />
-                        </svg>
-                    </div>
-                    {% endif %}
-                </div>
-            {% endfor %}
+                {% endfor %}
+
+                <!-- Connection lines drawn with SVG -->
+                <svg class="pipeline-connections">
+                    {% for i in range(1, steps|length) %}
+                    <path class="connector-path" id="connector-{{ i }}" />
+                    {% endfor %}
+                </svg>
+            </div>
         </div>
-        
+
+        <script>
+            // Draw connection lines between steps
+            function drawConnections() {
+                const steps = document.querySelectorAll('.pipeline-step');
+                if (steps.length <= 1) return;
+
+                const svg = document.querySelector('.pipeline-connections');
+
+                // Set SVG dimensions to match container
+                const container = document.querySelector('.pipeline-container');
+                svg.setAttribute('width', container.offsetWidth);
+                svg.setAttribute('height', container.offsetHeight);
+
+                // Draw connections between each step
+                for (let i = 0; i < steps.length - 1; i++) {
+                    const start = steps[i];
+                    const end = steps[i + 1];
+
+                    const startRect = start.getBoundingClientRect();
+                    const endRect = end.getBoundingClientRect();
+
+                    // Calculate positions relative to the SVG
+                    const startX = startRect.right - container.getBoundingClientRect().left;
+                    const startY = startRect.top + (startRect.height / 2) - container.getBoundingClientRect().top;
+                    const endX = endRect.left - container.getBoundingClientRect().left;
+                    const endY = endRect.top + (endRect.height / 2) - container.getBoundingClientRect().top;
+
+                    // Create curved path
+                    const midX = (startX + endX) / 2;
+                    const path = `M${startX},${startY} C${midX},${startY} ${midX},${endY} ${endX},${endY}`;
+
+                    // Update path
+                    const connector = document.getElementById(`connector-${i+1}`);
+                    connector.setAttribute('d', path);
+
+                    // Add arrowhead
+                    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                    marker.setAttribute('id', `arrowhead-${i+1}`);
+                    marker.setAttribute('markerWidth', '10');
+                    marker.setAttribute('markerHeight', '7');
+                    marker.setAttribute('refX', '10');
+                    marker.setAttribute('refY', '3.5');
+                    marker.setAttribute('orient', 'auto');
+
+                    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    polygon.setAttribute('points', '0 0, 10 3.5, 0 7');
+                    polygon.setAttribute('fill', '#3498db');
+
+                    marker.appendChild(polygon);
+                    svg.appendChild(marker);
+
+                    connector.setAttribute('marker-end', `url(#arrowhead-${i+1})`);
+                }
+            }
+
+            // Draw connections when page loads and when window resizes
+            window.addEventListener('load', drawConnections);
+            window.addEventListener('resize', drawConnections);
+        </script>
+
         <!-- Download Modal -->
         <div id="download-modal" class="modal hidden">
             <div class="modal-content">
@@ -94,8 +157,39 @@
                 </div>
             </div>
         </div>
+
+        <!-- Upload Modal -->
+        <div id="upload-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Upload File for <span id="upload-step-name">Step</span></h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="upload-form" action="/upload_to_step" method="post" enctype="multipart/form-data">
+                        <input type="hidden" id="upload-file-id" name="file_id">
+                        <input type="hidden" id="upload-step" name="step">
+
+                        <div class="form-group">
+                            <label for="upload-file">Select File:</label>
+                            <input type="file" id="upload-file" name="file" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="upload-comment">Comment (optional):</label>
+                            <textarea id="upload-comment" name="comment" rows="3"></textarea>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn">Upload</button>
+                            <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
-    
+
     <script>
         // Status change handling
         document.querySelectorAll('.status-select').forEach(select => {
@@ -103,7 +197,7 @@
                 const step = this.getAttribute('data-step');
                 const fileId = this.getAttribute('data-file-id');
                 const status = this.value;
-                
+
                 fetch('/update_status', {
                     method: 'POST',
                     headers: {
@@ -122,7 +216,7 @@
                         const statusIndicator = this.closest('.pipeline-card').querySelector('.status-indicator');
                         statusIndicator.className = `status-indicator status-${status.toLowerCase().replace(' ', '-')}`;
                         statusIndicator.textContent = status;
-                        
+
                         // Show success message
                         alert('Status updated successfully');
                     } else {
@@ -135,22 +229,22 @@
                 });
             });
         });
-        
+
         // Download modal handling
         const downloadModal = document.getElementById('download-modal');
         const downloadFilesList = document.getElementById('download-files-list');
-        
+
         document.querySelectorAll('.download-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const step = this.getAttribute('data-step');
-                
+
                 // Fetch file versions for this step
                 fetch(`/api/file_versions/{{ file_id }}/${step}`)
                 .then(response => response.json())
                 .then(data => {
                     // Clear previous list
                     downloadFilesList.innerHTML = '';
-                    
+
                     if (data.versions && data.versions.length > 0) {
                         // Create list of file versions
                         data.versions.forEach(version => {
@@ -161,6 +255,7 @@
                                     <p><strong>Filename:</strong> ${version.filename}</p>
                                     <p><strong>Uploaded:</strong> ${version.timestamp}</p>
                                     <p><strong>User:</strong> ${version.user}</p>
+                                    ${version.comment ? `<p><strong>Comment:</strong> ${version.comment}</p>` : ''}
                                 </div>
                                 <a href="/download/${version.file_id}/${version.step}" class="btn btn-small">Download</a>
                             `;
@@ -169,7 +264,7 @@
                     } else {
                         downloadFilesList.innerHTML = '<p>No files available for this step.</p>';
                     }
-                    
+
                     // Show the modal
                     downloadModal.classList.remove('hidden');
                 })
@@ -179,18 +274,43 @@
                 });
             });
         });
-        
-        // Close modal
-        document.querySelectorAll('.close-modal').forEach(element => {
-            element.addEventListener('click', function() {
-                downloadModal.classList.add('hidden');
+
+        // Upload modal handling
+        const uploadModal = document.getElementById('upload-modal');
+        const uploadStepName = document.getElementById('upload-step-name');
+        const uploadFileId = document.getElementById('upload-file-id');
+        const uploadStep = document.getElementById('upload-step');
+
+        document.querySelectorAll('.upload-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const step = this.getAttribute('data-step');
+                const fileId = this.getAttribute('data-file-id');
+
+                // Set form values
+                uploadStepName.textContent = step.charAt(0).toUpperCase() + step.slice(1);
+                uploadFileId.value = fileId;
+                uploadStep.value = step;
+
+                // Show the modal
+                uploadModal.classList.remove('hidden');
             });
         });
-        
+
+        // Close modals
+        document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
+            element.addEventListener('click', function() {
+                downloadModal.classList.add('hidden');
+                uploadModal.classList.add('hidden');
+            });
+        });
+
         // Close modal when clicking outside
         window.addEventListener('click', function(event) {
             if (event.target === downloadModal) {
                 downloadModal.classList.add('hidden');
+            }
+            if (event.target === uploadModal) {
+                uploadModal.classList.add('hidden');
             }
         });
     </script>
