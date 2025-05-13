@@ -38,9 +38,33 @@
         <div class="file-info">
             <p><strong>File ID:</strong> {{ file_id }}</p>
             <p><strong>Current Step:</strong> <span class="current-step-indicator">{{ file.current_step|capitalize }}</span></p>
+            <p><strong>Creation Time:</strong>
+                {% if file.creation_time %}
+                    {{ file.creation_time }}
+                {% else %}
+                    {% if file.history|length > 0 %}
+                        {{ file.history[0].timestamp }}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                {% endif %}
+            </p>
             <p><strong>Last Update:</strong>
                 {% if file.history|length > 0 %}
                     {{ file.history[-1].timestamp }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </p>
+            <p><strong>Total Time:</strong>
+                {% if file.creation_time and file.history|length > 0 %}
+                    {% set creation = file.creation_time %}
+                    {% set last_update = file.history[-1].timestamp %}
+                    {{ ((last_update|string)[:19]|to_datetime - (creation|string)[:19]|to_datetime)|string|replace('days', 'd')|replace('day', 'd') }}
+                {% elif file.history|length > 1 %}
+                    {% set creation = file.history[0].timestamp %}
+                    {% set last_update = file.history[-1].timestamp %}
+                    {{ ((last_update|string)[:19]|to_datetime - (creation|string)[:19]|to_datetime)|string|replace('days', 'd')|replace('day', 'd') }}
                 {% else %}
                     N/A
                 {% endif %}

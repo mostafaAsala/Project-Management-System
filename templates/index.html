@@ -75,7 +75,9 @@
                         <th>Supplier</th>
                         <th>Filename</th>
                         <th>Current Step</th>
+                        <th>Creation Time</th>
                         <th>Last Update</th>
+                        <th>Total Time</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -87,6 +89,17 @@
                         <td>{{ file.original_filename }}</td>
                         <td>{{ file.current_step|capitalize }}</td>
                         <td>
+                            {% if file.creation_time %}
+                                {{ file.creation_time }}
+                            {% else %}
+                                {% if file.history|length > 0 %}
+                                    {{ file.history[0].timestamp }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
                             {% if file.history|length > 0 %}
                                 {{ file.history[-1].timestamp }}
                             {% else %}
@@ -94,15 +107,30 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if file.creation_time and file.history|length > 0 %}
+                                {% set creation = file.creation_time %}
+                                {% set last_update = file.history[-1].timestamp %}
+                                {{ ((last_update|string)[:19]|to_datetime - (creation|string)[:19]|to_datetime)|string|replace('days', 'd')|replace('day', 'd') }}
+                            {% elif file.history|length > 1 %}
+                                {% set creation = file.history[0].timestamp %}
+                                {% set last_update = file.history[-1].timestamp %}
+                                {{ ((last_update|string)[:19]|to_datetime - (creation|string)[:19]|to_datetime)|string|replace('days', 'd')|replace('day', 'd') }}
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </td>
+                        <td>
                             {% set current_step = file.current_step %}
-                            {% set step_completed = false %}
-                            {% for entry in file.history %}
-                                {% if entry.step == current_step %}
-                                    {% set step_completed = true %}
+                            {% set ns = namespace(step_completed=true) %}
+                            
+                            {% for step_name, entry in file.step_statuses.items() %}
+                                {% if entry.status != 'Completed' %}
+                                    
+                                    {% set ns.step_completed = false %}
                                 {% endif %}
                             {% endfor %}
 
-                            {% if step_completed %}
+                            {% if ns.step_completed %}
                                 <span class="status-completed">Completed</span>
                             {% else %}
                                 <span class="status-in-progress">In Progress</span>
@@ -114,7 +142,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="no-data">No files in process.</td>
+                        <td colspan="8" class="no-data">No files in process.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

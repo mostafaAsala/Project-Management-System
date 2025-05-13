@@ -15,8 +15,29 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 app.secret_key = os.urandom(24)  # For session management
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+# Custom filter to convert string to datetime for time difference calculation
+@app.template_filter('to_datetime')
+def to_datetime(value):
+    return datetime.fromisoformat(value)
+
 # Load data from files
 users_db, files_db, steps, step_assignments = data_manager.load_data()
+
+# Migrate existing files to add creation_time if missing
+def migrate_files_creation_time():
+    for file_id, file in files_db.items():
+        if 'creation_time' not in file:
+            # Use the first history entry timestamp as creation time if available
+            if file.get('history') and len(file['history']) > 0:
+                file['creation_time'] = file['history'][0]['timestamp']
+            else:
+                # If no history, use current time
+                file['creation_time'] = datetime.now().strftime('%Y-%m-%d %H:%M')
+            # Mark data as changed
+            data_manager.mark_data_changed()
+
+# Run migration
+migrate_files_creation_time()
 
 # Start auto-save
 data_manager.start_auto_save(users_db, files_db, steps, step_assignments, interval=30)
@@ -275,7 +296,7 @@ def remove_step():
         return jsonify({"success": False, "message": f"Step '{step}' not found"}), 404
 
     # Check if any files are in this step
-    for file_id, file in files_db.items():
+    for _, file in files_db.items():
         if file.get('current_step') == step:
             return jsonify({"success": False, "message": f"Cannot remove step '{step}' because it has files. Move files to another step first."}), 400
 
@@ -514,7 +535,7 @@ def upload_file():
 
     file_id = request.form.get('file_id', str(uuid.uuid4()))
     filename = secure_filename(file.filename)
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     # Save file with unique name
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{filename}")
@@ -557,7 +578,8 @@ def upload_file():
             'history': [],
             'custom_steps': file_steps,  # Add custom steps for this file
             'step_assignments': file_step_assignments,  # Add file-specific step assignments
-            'step_statuses': file_step_statuses  # Add step statuses
+            'step_statuses': file_step_statuses,  # Add step statuses
+            'creation_time': timestamp  # Store creation time
         }
 
     files_db[file_id]['history'].append({
@@ -609,7 +631,7 @@ def upload_to_step():
         return redirect(url_for('file_pipeline', file_id=file_id))
 
     filename = secure_filename(file.filename)
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     # Save file with unique name
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{timestamp.replace(':', '_').replace('.', '_')}_{filename}")
@@ -713,7 +735,7 @@ def update_status():
     # Update the file status
     if status == 'Completed' or status == 'In Progress' or status == 'Not Started':
         # Add a status update entry to history
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
         files_db[file_id]['history'].append({
             'step': step,
             'timestamp': timestamp,
@@ -878,7 +900,7 @@ def add_file_step(file_id):
         file['step_statuses'] = {}
 
     # Initialize the status for the new step with timestamp and user
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     file['step_statuses'][step_name] = {
         'status': 'Not Started',
         'last_update': timestamp,
@@ -942,7 +964,7 @@ def rename_file_step(file_id):
 
         # Update the last_update and updated_by if it's a dictionary
         if isinstance(file['step_statuses'][new_step], dict):
-            timestamp = datetime.now().isoformat()
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
             file['step_statuses'][new_step]['last_update'] = timestamp
             file['step_statuses'][new_step]['updated_by'] = session['username']
 
@@ -1055,7 +1077,7 @@ def reset_file_steps(file_id):
     files_db[file_id]['custom_steps'] = steps.copy()
 
     # Reset step_statuses
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     files_db[file_id]['step_statuses'] = {}
     for s in steps:
         files_db[file_id]['step_statuses'][s] = {
