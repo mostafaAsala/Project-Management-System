@@ -39,6 +39,7 @@ def save_data(users_db, files_db, steps_list, step_assignments):
     """
     Save all data to files.
     """
+    print("saving all data")
     save_users(users_db)
     save_files_db(files_db)
     save_steps(steps_list)

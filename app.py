@@ -49,9 +49,10 @@ def is_authorized_for_step(username, step, file_id=None):
 # Helper function to count files in each step
 def count_files_in_steps():
     step_counts = {step: 0 for step in steps}
-
+    print(steps)
     for file_id, file in files_db.items():
         current_step = file.get('current_step')
+        print(current_step)
         if current_step in step_counts:
             step_counts[current_step] += 1
 
@@ -70,16 +71,47 @@ def update_current_step(file_id):
     for s in file_steps:
         step_statuses[s] = 'Not Started'
 
+    # Create dictionaries to track the status, last update time, and user for each step
+    step_last_updates = {}
+    step_users = {}
+
     # Update statuses based on history
     for entry in file['history']:
         if entry['step'] in step_statuses:
+            # Update timestamp and user if this is a newer entry
+            if entry['step'] not in step_last_updates or entry['timestamp'] > step_last_updates[entry['step']]:
+                step_last_updates[entry['step']] = entry['timestamp']
+                step_users[entry['step']] = entry['user']
+
             if entry.get('filename', '').startswith('Status update to '):
                 status = entry['filename'].replace('Status update to ', '')
                 step_statuses[entry['step']] = status
-            elif entry.get('path'):  # If there's a file upload, mark as completed
-                step_statuses[entry['step']] = 'in progress'
+            elif entry.get('path'):  # If there's a file upload, mark as in progress
+                step_statuses[entry['step']] = 'In Progress'
             else:
                 step_statuses[entry['step']] = 'Completed'
+
+    # Ensure file has step_statuses dictionary
+    if 'step_statuses' not in file:
+        file['step_statuses'] = {}
+
+    # Update the file's step_statuses with the calculated values
+    for s in file_steps:
+        # If we don't have an existing entry, create a new one with default values
+        if s not in file['step_statuses'] or not isinstance(file['step_statuses'][s], dict):
+            file['step_statuses'][s] = {
+                'status': step_statuses[s],
+                'last_update': step_last_updates.get(s, None),
+                'updated_by': step_users.get(s, None)
+            }
+        else:
+            # Update only the status if the entry already exists as a dictionary
+            file['step_statuses'][s]['status'] = step_statuses[s]
+
+            # Update last_update and updated_by if we have newer information
+            if s in step_last_updates:
+                file['step_statuses'][s]['last_update'] = step_last_updates[s]
+                file['step_statuses'][s]['updated_by'] = step_users[s]
 
     # Find the first non-completed step
     next_step = None
@@ -313,7 +345,7 @@ def file_pipeline(file_id):
         return redirect(url_for('index'))
 
     file = files_db[file_id]
-
+    print(file)
     # Use file's custom steps if available, otherwise use default steps
     file_steps = file.get('custom_steps', steps)
     print(file_steps)
@@ -336,17 +368,44 @@ def file_pipeline(file_id):
             'can_edit': is_authorized_for_step(session['username'], step, file_id)
         }
 
-        # Check file history for this step
-        for entry in file['history']:
-            if entry['step'] == step:
-                if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
-                    step_data['last_update'] = entry['timestamp']
-                    step_data['user'] = entry['user']
-                    step_data['status'] = 'In Progress'
+        # Use saved step status if available
+        if 'step_statuses' in file and step in file['step_statuses']:
+            if isinstance(file['step_statuses'][step], dict):
+                # Use the stored dictionary values
+                step_data['status'] = file['step_statuses'][step].get('status', 'Not Started')
+                step_data['last_update'] = file['step_statuses'][step].get('last_update')
+                step_data['user'] = file['step_statuses'][step].get('updated_by')
+            else:
+                # For backward compatibility with old format where step_statuses just stored the status string
+                step_data['status'] = file['step_statuses'][step]
 
-        # Current step is in progress
-        if file['current_step'] == step and step_data['status'] != 'Completed':
-            step_data['status'] = 'In Progress'
+                # Still need to get last_update and user from history
+                for entry in file['history']:
+                    if entry['step'] == step:
+                        if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
+                            step_data['last_update'] = entry['timestamp']
+                            step_data['user'] = entry['user']
+        else:
+            # Fall back to calculating from history for backward compatibility
+            # Check file history for this step
+            for entry in file['history']:
+                if entry['step'] == step:
+                    if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
+                        step_data['last_update'] = entry['timestamp']
+                        step_data['user'] = entry['user']
+
+                        # Check for explicit status updates
+                        if entry.get('filename', '').startswith('Status update to '):
+                            status = entry['filename'].replace('Status update to ', '')
+                            step_data['status'] = status
+                        elif entry.get('path'):  # If there's a file upload
+                            step_data['status'] = 'In Progress'
+                        else:
+                            step_data['status'] = 'Completed'
+
+            # Current step is in progress if not already completed
+            if file['current_step'] == step and step_data['status'] != 'Completed':
+                step_data['status'] = 'In Progress'
 
         step_statuses[step] = step_data
 
@@ -460,7 +519,7 @@ def upload_file():
     # Save file with unique name
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{filename}")
     file.save(file_path)
-
+    print(files_db)
     # Update database
     if file_id not in files_db:
         # Create a copy of the default steps for this file
@@ -474,13 +533,31 @@ def upload_file():
                 if s in user_data.get('roles', []):
                     file_step_assignments[s].append(username)
 
+        # Initialize step_statuses for all steps
+        file_step_statuses = {}
+        for s in file_steps:
+            file_step_statuses[s] = {
+                'status': 'Not Started',
+                'last_update': None,
+                'updated_by': None
+            }
+
+        # Set the current step to In Progress
+        if file_steps:
+            file_step_statuses[file_steps[0]] = {
+                'status': 'In Progress',
+                'last_update': timestamp,
+                'updated_by': session['username']
+            }
+
         files_db[file_id] = {
             'supplier': supplier,
             'original_filename': filename,
             'current_step': file_steps[0] if file_steps else step,  # Start with the first step by default
             'history': [],
             'custom_steps': file_steps,  # Add custom steps for this file
-            'step_assignments': file_step_assignments  # Add file-specific step assignments
+            'step_assignments': file_step_assignments,  # Add file-specific step assignments
+            'step_statuses': file_step_statuses  # Add step statuses
         }
 
     files_db[file_id]['history'].append({
@@ -610,6 +687,7 @@ def get_file_versions(file_id, step):
 
 @app.route('/update_status', methods=['POST'])
 def update_status():
+    print("update step status first")
     if 'username' not in session:
         return jsonify({"success": False, "message": "Not authenticated"}), 401
 
@@ -633,7 +711,7 @@ def update_status():
         return jsonify({"success": False, "message": "Not authorized to update this step"}), 403
 
     # Update the file status
-    if status == 'Completed' or status == 'In Progress':
+    if status == 'Completed' or status == 'In Progress' or status == 'Not Started':
         # Add a status update entry to history
         timestamp = datetime.now().isoformat()
         files_db[file_id]['history'].append({
@@ -644,6 +722,23 @@ def update_status():
             'user': session['username']
         })
 
+        # Ensure file has step_statuses dictionary
+        if 'step_statuses' not in files_db[file_id]:
+            files_db[file_id]['step_statuses'] = {}
+
+        # Ensure the step has a status entry as a dictionary
+        if step not in files_db[file_id]['step_statuses'] or not isinstance(files_db[file_id]['step_statuses'][step], dict):
+            files_db[file_id]['step_statuses'][step] = {
+                'status': status,
+                'last_update': timestamp,
+                'updated_by': session['username']
+            }
+        else:
+            # Update the status, timestamp, and user
+            files_db[file_id]['step_statuses'][step]['status'] = status
+            files_db[file_id]['step_statuses'][step]['last_update'] = timestamp
+            files_db[file_id]['step_statuses'][step]['updated_by'] = session['username']
+
         # Get file's custom steps
         file_steps = files_db[file_id].get('custom_steps', steps)
 
@@ -651,7 +746,7 @@ def update_status():
         if status == 'Completed':
             # Find the last completed step and set current step to the next one
             update_current_step(file_id)
-
+        print("updated step status")
         # Mark data as changed
         data_manager.mark_data_changed()
 
@@ -685,17 +780,44 @@ def manage_file_steps(file_id):
             'user': None
         }
 
-        # Check file history for this step
-        for entry in file['history']:
-            if entry['step'] == step:
-                if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
-                    step_data['last_update'] = entry['timestamp']
-                    step_data['user'] = entry['user']
-                    step_data['status'] = 'Completed'
+        # Use saved step status if available
+        if 'step_statuses' in file and step in file['step_statuses']:
+            if isinstance(file['step_statuses'][step], dict):
+                # Use the stored dictionary values
+                step_data['status'] = file['step_statuses'][step].get('status', 'Not Started')
+                step_data['last_update'] = file['step_statuses'][step].get('last_update')
+                step_data['user'] = file['step_statuses'][step].get('updated_by')
+            else:
+                # For backward compatibility with old format where step_statuses just stored the status string
+                step_data['status'] = file['step_statuses'][step]
 
-        # Current step is in progress
-        if file['current_step'] == step and step_data['status'] != 'Completed':
-            step_data['status'] = 'In Progress'
+                # Still need to get last_update and user from history
+                for entry in file['history']:
+                    if entry['step'] == step:
+                        if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
+                            step_data['last_update'] = entry['timestamp']
+                            step_data['user'] = entry['user']
+        else:
+            # Fall back to calculating from history for backward compatibility
+            # Check file history for this step
+            for entry in file['history']:
+                if entry['step'] == step:
+                    if step_data['last_update'] is None or entry['timestamp'] > step_data['last_update']:
+                        step_data['last_update'] = entry['timestamp']
+                        step_data['user'] = entry['user']
+
+                        # Check for explicit status updates
+                        if entry.get('filename', '').startswith('Status update to '):
+                            status = entry['filename'].replace('Status update to ', '')
+                            step_data['status'] = status
+                        elif entry.get('path'):  # If there's a file upload
+                            step_data['status'] = 'In Progress'
+                        else:
+                            step_data['status'] = 'Completed'
+
+            # Current step is in progress if not already completed
+            if file['current_step'] == step and step_data['status'] != 'Completed':
+                step_data['status'] = 'In Progress'
 
         step_statuses[step] = step_data
 
@@ -751,6 +873,18 @@ def add_file_step(file_id):
         else:
             file['custom_steps'].append(step_name)
 
+    # Ensure file has step_statuses dictionary
+    if 'step_statuses' not in file:
+        file['step_statuses'] = {}
+
+    # Initialize the status for the new step with timestamp and user
+    timestamp = datetime.now().isoformat()
+    file['step_statuses'][step_name] = {
+        'status': 'Not Started',
+        'last_update': timestamp,
+        'updated_by': session['username']
+    }
+
     # Mark data as changed
     data_manager.mark_data_changed()
 
@@ -797,6 +931,21 @@ def rename_file_step(file_id):
         if entry['step'] == old_step:
             entry['step'] = new_step
 
+    # Update step_statuses if they exist
+    if 'step_statuses' in file and old_step in file['step_statuses']:
+        # Save the old status data
+        old_status_data = file['step_statuses'][old_step]
+        # Remove the old step
+        del file['step_statuses'][old_step]
+        # Add the new step with the old status data
+        file['step_statuses'][new_step] = old_status_data
+
+        # Update the last_update and updated_by if it's a dictionary
+        if isinstance(file['step_statuses'][new_step], dict):
+            timestamp = datetime.now().isoformat()
+            file['step_statuses'][new_step]['last_update'] = timestamp
+            file['step_statuses'][new_step]['updated_by'] = session['username']
+
     # Mark data as changed
     data_manager.mark_data_changed()
 
@@ -841,6 +990,10 @@ def remove_file_step(file_id):
 
     # Remove step from file's steps list
     file['custom_steps'].remove(step)
+
+    # Remove step from step_statuses if it exists
+    if 'step_statuses' in file and step in file['step_statuses']:
+        del file['step_statuses'][step]
 
     # Mark data as changed
     data_manager.mark_data_changed()
@@ -900,6 +1053,24 @@ def reset_file_steps(file_id):
 
     # Reset to default steps
     files_db[file_id]['custom_steps'] = steps.copy()
+
+    # Reset step_statuses
+    timestamp = datetime.now().isoformat()
+    files_db[file_id]['step_statuses'] = {}
+    for s in steps:
+        files_db[file_id]['step_statuses'][s] = {
+            'status': 'Not Started',
+            'last_update': timestamp,
+            'updated_by': session['username']
+        }
+
+    # Set current step to In Progress
+    if steps:
+        files_db[file_id]['step_statuses'][steps[0]] = {
+            'status': 'In Progress',
+            'last_update': timestamp,
+            'updated_by': session['username']
+        }
 
     # Mark data as changed
     data_manager.mark_data_changed()
