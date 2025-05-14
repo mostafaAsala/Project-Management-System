@@ -90,10 +90,10 @@
                         <td>{{ file.current_step|capitalize }}</td>
                         <td>
                             {% if file.creation_time %}
-                                {{ file.creation_time }}
+                                {{ file.creation_time | strftime }}
                             {% else %}
                                 {% if file.history|length > 0 %}
-                                    {{ file.history[0].timestamp }}
+                                    {{ file.history[0].timestamp | strftime }}
                                 {% else %}
                                     N/A
                                 {% endif %}
@@ -101,7 +101,7 @@
                         </td>
                         <td>
                             {% if file.history|length > 0 %}
-                                {{ file.history[-1].timestamp }}
+                                {{ file.history[-1].timestamp|strftime }}
                             {% else %}
                                 N/A
                             {% endif %}
@@ -110,7 +110,7 @@
                             {% if file.creation_time and file.history|length > 0 %}
                                 {% set creation = file.creation_time %}
                                 {% set last_update = file.history[-1].timestamp %}
-                                {{ ((last_update|string)[:19]|to_datetime - (creation|string)[:19]|to_datetime)|string|replace('days', 'd')|replace('day', 'd') }}
+                                {{ ((last_update|string)[:19]|to_datetime - (creation|string)[:19]|to_datetime)|string|replace('days', 'd')|replace('day', 'd')  }}
                             {% elif file.history|length > 1 %}
                                 {% set creation = file.history[0].timestamp %}
                                 {% set last_update = file.history[-1].timestamp %}

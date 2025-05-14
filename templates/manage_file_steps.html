@@ -42,7 +42,7 @@
             <p><strong>Current Step:</strong> {{ file.current_step|capitalize }}</p>
             <p><strong>Last Update:</strong> 
                 {% if file.history|length > 0 %}
-                    {{ file.history[-1].timestamp }}
+                    {{ file.history[-1].timestamp|strftime }}
                 {% else %}
                     N/A
                 {% endif %}

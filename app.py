@@ -1,3 +1,4 @@
+import dateutil
 from flask import Flask, render_template, request, redirect, url_for, send_file, jsonify, session, flash
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -14,6 +15,14 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 app.secret_key = os.urandom(24)  # For session management
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+@app.template_filter('strftime')
+def _jinja2_filter_datetime(date, fmt=None):
+    date = dateutil.parser.parse(date)
+    native = date.replace(tzinfo=None)
+    format='%Y-%m-%d, %H:%M'
+    return native.strftime(format) 
+
 
 # Custom filter to convert string to datetime for time difference calculation
 @app.template_filter('to_datetime')

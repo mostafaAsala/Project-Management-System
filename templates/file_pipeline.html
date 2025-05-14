@@ -51,7 +51,11 @@
             </p>
             <p><strong>Last Update:</strong>
                 {% if file.history|length > 0 %}
-                    {{ file.history[-1].timestamp }}
+                    {% if file.history[-1].timestamp %}
+                        {{ file.history[-1].timestamp|strftime }}
+                    {% else %}
+                        Never
+                    {% endif %}
                 {% else %}
                     N/A
                 {% endif %}
@@ -71,23 +75,25 @@
             </p>
             <p><strong>Process Progress:</strong>
                 <div class="progress-bar">
-                    {% set completed_count = 0 %}
-                    {% for step in steps %}
-                        {% set step_completed = false %}
-                        {% for entry in file.history %}
-                            {% if entry.step == step and (entry.path or entry.filename.startswith('Status update to Completed')) %}
-                                {% set step_completed = true %}
-                                {% set completed_count = completed_count + 1 %}
-                            {% endif %}
-                        {% endfor %}
+                    {% set ns = namespace(step_completed=true,completed_count=0) %}
+                    {% set ns.step_completed = false %}
+                    {% set ns.completed_count = 0 %}
+                    
+                    {% for step_name, entry in file.step_statuses.items() %}
+                        {% set ns.step_completed = false %}
+                        {% if entry.status == 'Completed' %}
+                            {% set ns.step_completed = true %}
+                            {% set ns.completed_count = ns.completed_count + 1 %}
+                        {% endif %}
+                    
 
                         <div class="progress-step
                             {% if step_completed %}completed{% endif %}
-                            {% if step == file.current_step %}current{% endif %}"
+                            {% if step_name == file.current_step %}current{% endif %}"
                             title="{{ step|capitalize }}">
                         </div>
                     {% endfor %}
-                    <div class="progress-text">{{ completed_count }} of {{ steps|length }} steps completed</div>
+                    <div class="progress-text">{{ ns.completed_count }} of {{ steps|length }} steps completed</div>
                 </div>
             </p>
         </div>
@@ -103,7 +109,11 @@
                                 {{ step_data.status }}
                             </div>
                             <div class="card-details">
-                                <p><strong>Last Update:</strong> {{ step_data.last_update|default('Never', true) }}</p>
+                                <p><strong>Last Update:</strong> {% if step_data.last_update %}
+                                                                {{ step_data.last_update | strftime }}
+                                                                {% else %}
+                                                                Never
+                                                                {% endif %}</p>
                                 <p><strong>Updated By:</strong> {{ step_data.user|default('N/A', true) }}</p>
                                 <p><strong>Assigned Users:</strong>
                                     {% if file.step_assignments and step in file.step_assignments %}
