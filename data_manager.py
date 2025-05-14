@@ -11,6 +11,7 @@ USERS_FILE = os.path.join(DATA_DIR, 'users.pkl')
 FILES_DB_FILE = os.path.join(DATA_DIR, 'files_db.pkl')
 STEPS_FILE = os.path.join(DATA_DIR, 'steps.pkl')
 STEP_ASSIGNMENTS_FILE = os.path.join(DATA_DIR, 'step_assignments.pkl')
+CUSTOM_STEPS_FILE = os.path.join(DATA_DIR, 'custom_steps.pkl')
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 
 # Ensure data directories exist
@@ -32,10 +33,25 @@ def load_data():
     files_db = load_files_db()
     steps_list = load_steps()
     step_assignments = load_step_assignments()
-    
-    return users_db, files_db, steps_list, step_assignments
+    custom_steps_list = load_custom_steps()
 
-def save_data(users_db, files_db, steps_list, step_assignments):
+    return users_db, files_db, steps_list, step_assignments, custom_steps_list
+
+def load_custom_steps():
+    """
+    Load custom steps list from file.
+    """
+    if os.path.exists(CUSTOM_STEPS_FILE):
+        try:
+            with open(CUSTOM_STEPS_FILE, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Error loading custom steps data: {e}")
+            return []
+    else:
+        return []
+
+def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list=None):
     """
     Save all data to files.
     """
@@ -44,6 +60,8 @@ def save_data(users_db, files_db, steps_list, step_assignments):
     save_files_db(files_db)
     save_steps(steps_list)
     save_step_assignments(step_assignments)
+    if custom_steps_list is not None:
+        save_custom_steps(custom_steps_list)
     create_backup()
 
 def mark_data_changed():
@@ -149,13 +167,25 @@ def save_step_assignments(step_assignments):
     except Exception as e:
         print(f"Error saving step assignments data: {e}")
 
+
+
+def save_custom_steps(custom_steps_list):
+    """
+    Save custom steps list to file.
+    """
+    try:
+        with open(CUSTOM_STEPS_FILE, 'wb') as f:
+            pickle.dump(custom_steps_list, f)
+    except Exception as e:
+        print(f"Error saving custom steps data: {e}")
+
 def create_default_users():
     """
     Create default users database.
     """
     from werkzeug.security import generate_password_hash
     default_steps = create_default_steps()
-    
+
     return {
         'admin': {
             'password': generate_password_hash('admin'),
@@ -177,10 +207,10 @@ def create_default_step_assignments():
     """
     default_steps = create_default_steps()
     step_assignments = {}
-    
+
     for step in default_steps:
         step_assignments[step] = ['admin']
-    
+
     return step_assignments
 
 def create_backup():
@@ -190,7 +220,7 @@ def create_backup():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_folder = os.path.join(BACKUP_DIR, timestamp)
     os.makedirs(backup_folder, exist_ok=True)
-    
+
     # Copy all data files to backup folder
     for file_path in [USERS_FILE, FILES_DB_FILE, STEPS_FILE, STEP_ASSIGNMENTS_FILE]:
         if os.path.exists(file_path):
@@ -202,31 +232,31 @@ def create_backup():
             except Exception as e:
                 print(f"Error creating backup for {file_path}: {e}")
 
-def start_auto_save(users_db, files_db, steps_list, step_assignments, interval=60):
+def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, interval=60):
     """
     Start auto-save thread that saves data at regular intervals if changes were made.
     """
     global _auto_save_thread, _stop_auto_save
-    
+
     if _auto_save_thread is not None and _auto_save_thread.is_alive():
         return  # Auto-save already running
-    
+
     _stop_auto_save.clear()
-    
+
     def auto_save_worker():
         global _data_changed
-        
+
         while not _stop_auto_save.is_set():
             # Check if data has changed
             if _data_changed:
                 with _save_lock:
-                    save_data(users_db, files_db, steps_list, step_assignments)
+                    save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list)
                     _data_changed = False
                     print(f"Auto-saved data at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            
+
             # Wait for the next interval
             _stop_auto_save.wait(interval)
-    
+
     _auto_save_thread = threading.Thread(target=auto_save_worker, daemon=True)
     _auto_save_thread.start()
     print(f"Auto-save started with {interval} second interval")
@@ -236,7 +266,7 @@ def stop_auto_save():
     Stop the auto-save thread.
     """
     global _auto_save_thread, _stop_auto_save
-    
+
     if _auto_save_thread is not None and _auto_save_thread.is_alive():
         _stop_auto_save.set()
         _auto_save_thread.join(timeout=5)

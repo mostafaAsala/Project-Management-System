@@ -3,6 +3,24 @@
 <head>
     <title>Register User - File Processing Pipeline</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .custom-step-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .custom-step-row input {
+            flex: 1;
+            margin-right: 10px;
+        }
+        .add-custom-step-btn, .remove-custom-step-btn {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            line-height: 1;
+            font-size: 18px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -39,6 +57,17 @@
                     {% endfor %}
                 </div>
             </div>
+
+            <div class="form-group">
+                <label>Custom Steps:</label>
+                <p class="help-text">Add custom steps that are not in the original steps list. These will be stored with the user's profile and the user will be automatically assigned to these steps if they are ever added to a flow.</p>
+                <div id="custom-steps-container">
+                    <div class="custom-step-row">
+                        <input type="text" name="custom_steps" placeholder="Enter custom step name">
+                        <button type="button" class="btn btn-small add-custom-step-btn">+</button>
+                    </div>
+                </div>
+            </div>
             <div class="form-group">
                 <div class="checkbox-item">
                     <input type="checkbox" id="is_admin" name="is_admin">
@@ -51,5 +80,23 @@
             </div>
         </form>
     </div>
+
+    <script>
+        // Handle adding more custom step fields
+        document.addEventListener('click', function(event) {
+            if (event.target.classList.contains('add-custom-step-btn')) {
+                const container = document.getElementById('custom-steps-container');
+                const newRow = document.createElement('div');
+                newRow.className = 'custom-step-row';
+                newRow.innerHTML = `
+                    <input type="text" name="custom_steps" placeholder="Enter custom step name">
+                    <button type="button" class="btn btn-small remove-custom-step-btn">-</button>
+                `;
+                container.appendChild(newRow);
+            } else if (event.target.classList.contains('remove-custom-step-btn')) {
+                event.target.closest('.custom-step-row').remove();
+            }
+        });
+    </script>
 </body>
 </html>

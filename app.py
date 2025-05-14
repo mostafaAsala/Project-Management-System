@@ -30,11 +30,11 @@ def to_datetime(value):
     return datetime.fromisoformat(value)
 
 # Load data from files
-users_db, files_db, steps, step_assignments = data_manager.load_data()
+users_db, files_db, steps, step_assignments, custom_steps_list = data_manager.load_data()
 
 # Migrate existing files to add creation_time if missing
 def migrate_files_creation_time():
-    for file_id, file in files_db.items():
+    for _, file in files_db.items():
         if 'creation_time' not in file:
             # Use the first history entry timestamp as creation time if available
             if file.get('history') and len(file['history']) > 0:
@@ -49,11 +49,11 @@ def migrate_files_creation_time():
 migrate_files_creation_time()
 
 # Start auto-save
-data_manager.start_auto_save(users_db, files_db, steps, step_assignments, interval=30)
+data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, interval=30)
 
 # Register function to save data when the application exits
 def save_data_on_exit():
-    data_manager.save_data(users_db, files_db, steps, step_assignments)
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list)
     data_manager.stop_auto_save()
 
 atexit.register(save_data_on_exit)
@@ -73,6 +73,10 @@ def is_authorized_for_step(username, step, file_id=None):
         if 'step_assignments' in file and step in file['step_assignments']:
             return username in file['step_assignments'][step]
 
+    # Check if step is in user's custom steps
+    if step in users_db[username].get('custom_steps', []):
+        return True
+
     # Fall back to global roles if no file-specific assignment or not authorized
     return step in users_db[username].get('roles', [])
 
@@ -80,7 +84,7 @@ def is_authorized_for_step(username, step, file_id=None):
 def count_files_in_steps():
     step_counts = {step: 0 for step in steps}
     print(steps)
-    for file_id, file in files_db.items():
+    for _, file in files_db.items():
         current_step = file.get('current_step')
         print(current_step)
         if current_step in step_counts:
@@ -187,6 +191,7 @@ def manage_steps():
     return render_template('manage_steps.html',
                           steps=steps,
                           step_counts=step_counts,
+                          custom_steps=custom_steps_list,
                           username=session['username'],
                           is_admin=True)
 
@@ -230,6 +235,10 @@ def add_step():
     # Update user assignments for admin
     users_db['admin']['assigned_steps'].append(step_name)
 
+    # Add to custom steps list
+    if step_name not in custom_steps_list:
+        custom_steps_list.append(step_name)
+
     # Mark data as changed
     data_manager.mark_data_changed()
 
@@ -266,13 +275,13 @@ def rename_step():
     step_assignments[new_step] = step_assignments.pop(old_step, [])
 
     # Update user assignments
-    for username, user_data in users_db.items():
+    for _, user_data in users_db.items():
         if old_step in user_data.get('assigned_steps', []):
             user_data['assigned_steps'].remove(old_step)
             user_data['assigned_steps'].append(new_step)
 
     # Update files
-    for file_id, file in files_db.items():
+    for _, file in files_db.items():
         if file.get('current_step') == old_step:
             file['current_step'] = new_step
 
@@ -280,6 +289,11 @@ def rename_step():
         for entry in file.get('history', []):
             if entry.get('step') == old_step:
                 entry['step'] = new_step
+
+    # Update custom steps list if needed
+    if old_step in custom_steps_list:
+        custom_steps_list.remove(old_step)
+        custom_steps_list.append(new_step)
 
     # Mark data as changed
     data_manager.mark_data_changed()
@@ -317,9 +331,13 @@ def remove_step():
         del step_assignments[step]
 
     # Remove step from user assignments
-    for username, user_data in users_db.items():
+    for _, user_data in users_db.items():
         if step in user_data.get('assigned_steps', []):
             user_data['assigned_steps'].remove(step)
+
+    # Remove step from custom steps list if it's there
+    if step in custom_steps_list:
+        custom_steps_list.remove(step)
 
     # Remove step from file history (but keep the entries for record)
 
@@ -385,7 +403,8 @@ def file_pipeline(file_id):
         for s in file_steps:
             file['step_assignments'][s] = []
             for username, user_data in users_db.items():
-                if s in user_data.get('roles', []):
+                # Check if step is in user's roles or custom steps
+                if s in user_data.get('roles', []) or s in user_data.get('custom_steps', []):
                     file['step_assignments'][s].append(username)
 
     # Get status for each step in the pipeline
@@ -576,14 +595,14 @@ def delete_user():
         return jsonify({"success": False, "message": "Cannot delete your own account"}), 403
 
     # Remove user from global step assignments
-    for step, users in step_assignments.items():
+    for _, users in step_assignments.items():
         if username_to_delete in users:
             users.remove(username_to_delete)
 
     # Remove user from file-specific step assignments
-    for file_id, file in files_db.items():
+    for _, file in files_db.items():
         if 'step_assignments' in file:
-            for step, users in file['step_assignments'].items():
+            for _, users in file['step_assignments'].items():
                 if username_to_delete in users:
                     users.remove(username_to_delete)
 
@@ -607,6 +626,11 @@ def register():
         assigned_roles = request.form.getlist('assigned_roles')  # These are global roles
         is_admin = 'is_admin' in request.form
 
+        # Get custom steps
+        custom_steps = request.form.getlist('custom_steps')
+        # Filter out empty values
+        custom_steps = [step.strip().lower() for step in custom_steps if step.strip()]
+
         if username in users_db:
             flash('Username already exists')
         else:
@@ -614,6 +638,7 @@ def register():
                 'password': generate_password_hash(password),
                 'assigned_steps': assigned_roles.copy(),  # For backward compatibility
                 'roles': assigned_roles,  # Global roles for new files
+                'custom_steps': custom_steps,  # Store custom steps with the user
                 'is_admin': is_admin
             }
 
@@ -626,7 +651,7 @@ def register():
                     step_assignments[step].remove(username)
 
             # Update file-specific step assignments for all existing files
-            for file_id, file in files_db.items():
+            for _, file in files_db.items():
                 if 'step_assignments' not in file:
                     # Create step assignments if they don't exist
                     file['step_assignments'] = {}
@@ -680,16 +705,20 @@ def upload_file():
     file.save(file_path)
     print(files_db)
     # Update database
+  
     if file_id not in files_db:
+        if file_id == '':
+            file_id = str(uuid.uuid4())
         # Create a copy of the default steps for this file
         file_steps = steps.copy()
-
-        # Create file-specific step assignments based on global roles
+ 
+        # Create file-specific step assignments based on global roles and custom steps
         file_step_assignments = {}
         for s in file_steps:
             file_step_assignments[s] = []
             for username, user_data in users_db.items():
-                if s in user_data.get('roles', []):
+                # Check if step is in user's roles or custom steps
+                if s in user_data.get('roles', []) or s in user_data.get('custom_steps', []):
                     file_step_assignments[s].append(username)
 
         # Initialize step_statuses for all steps
@@ -1135,6 +1164,18 @@ def add_file_step(file_id):
         'updated_by': session['username']
     }
 
+    # Ensure file has step_assignments
+    if 'step_assignments' not in file:
+        file['step_assignments'] = {}
+
+    # Initialize step assignments for the new step
+    file['step_assignments'][step_name] = []
+
+    # Automatically assign users who have this step in their custom steps
+    for username, user_data in users_db.items():
+        if step_name in user_data.get('custom_steps', []) or step_name in user_data.get('roles', []):
+            file['step_assignments'][step_name].append(username)
+
     # Mark data as changed
     data_manager.mark_data_changed()
 
@@ -1354,7 +1395,7 @@ def get_step_users(file_id, step):
         for s in file_steps:
             file['step_assignments'][s] = []
             for username, user_data in users_db.items():
-                if s in user_data.get('roles', []):
+                if s in user_data.get('roles', []) or s in user_data.get('custom_steps', []):
                     file['step_assignments'][s].append(username)
 
     # If this step doesn't have assignments yet, initialize it

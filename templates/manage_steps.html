@@ -3,6 +3,18 @@
 <head>
     <title>Manage Process Steps</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .custom-step-badge {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            font-size: 0.8em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+    </style>
 </head>
 <body>
     <div class="header">
@@ -13,7 +25,7 @@
             <a href="{{ url_for('index') }}" class="btn btn-small">Back to Overview</a>
         </div>
     </div>
-    
+
     {% with messages = get_flashed_messages() %}
     {% if messages %}
     <div class="flash-messages">
@@ -23,18 +35,18 @@
     </div>
     {% endif %}
     {% endwith %}
-    
+
     <div class="container">
         <div class="actions-bar">
             <h2>Manage Process Steps</h2>
             <button id="add-step-btn" class="btn">Add New Step</button>
         </div>
-        
+
         <div class="warning-box">
-            <p><strong>Warning:</strong> Changing the process steps will affect all files in the system. 
+            <p><strong>Warning:</strong> Changing the process steps will affect all files in the system.
             Removing a step will delete all associated data for that step.</p>
         </div>
-        
+
         <div class="table-container">
             <table class="steps-table">
                 <thead>
@@ -51,6 +63,9 @@
                         <td>{{ loop.index }}</td>
                         <td>
                             <span class="step-name">{{ step|capitalize }}</span>
+                            {% if step in custom_steps %}
+                            <span class="custom-step-badge">Custom</span>
+                            {% endif %}
                             <input type="text" class="step-edit-input hidden" value="{{ step }}">
                         </td>
                         <td>{{ step_counts[step] }}</td>
@@ -71,7 +86,7 @@
                 </tbody>
             </table>
         </div>
-        
+
         <!-- Add Step Modal -->
         <div id="add-step-modal" class="modal hidden">
             <div class="modal-content">
@@ -104,29 +119,29 @@
             </div>
         </div>
     </div>
-    
+
     <script>
         // Add step modal
         const addStepModal = document.getElementById('add-step-modal');
         const addStepBtn = document.getElementById('add-step-btn');
-        
+
         addStepBtn.addEventListener('click', function() {
             addStepModal.classList.remove('hidden');
         });
-        
+
         document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
             element.addEventListener('click', function() {
                 addStepModal.classList.add('hidden');
             });
         });
-        
+
         // Close modal when clicking outside
         window.addEventListener('click', function(event) {
             if (event.target === addStepModal) {
                 addStepModal.classList.add('hidden');
             }
         });
-        
+
         // Edit step name
         document.querySelectorAll('.edit-step-btn').forEach(button => {
             button.addEventListener('click', function() {
@@ -138,7 +153,7 @@
                 row.querySelector('.cancel-step-btn').classList.remove('hidden');
             });
         });
-        
+
         // Cancel edit
         document.querySelectorAll('.cancel-step-btn').forEach(button => {
             button.addEventListener('click', function() {
@@ -148,25 +163,25 @@
                 row.querySelector('.edit-step-btn').classList.remove('hidden');
                 row.querySelector('.save-step-btn').classList.add('hidden');
                 row.querySelector('.cancel-step-btn').classList.add('hidden');
-                
+
                 // Reset input value to original
                 const originalName = row.querySelector('.step-name').textContent;
                 row.querySelector('.step-edit-input').value = originalName;
             });
         });
-        
+
         // Save step name
         document.querySelectorAll('.save-step-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const row = this.closest('tr');
                 const oldStep = row.getAttribute('data-step');
                 const newStep = row.querySelector('.step-edit-input').value.trim();
-                
+
                 if (newStep === '') {
                     alert('Step name cannot be empty');
                     return;
                 }
-                
+
                 // Send update to server
                 fetch('/rename_step', {
                     method: 'POST',
@@ -189,7 +204,7 @@
                         row.querySelector('.edit-step-btn').classList.remove('hidden');
                         row.querySelector('.save-step-btn').classList.add('hidden');
                         row.querySelector('.cancel-step-btn').classList.add('hidden');
-                        
+
                         // Show success message
                         alert('Step renamed successfully');
                     } else {
@@ -202,7 +217,7 @@
                 });
             });
         });
-        
+
         // Remove step
         document.querySelectorAll('.remove-step-btn').forEach(button => {
             button.addEventListener('click', function() {
@@ -210,10 +225,10 @@
                     alert('Cannot remove a step that has files. Move files to another step first.');
                     return;
                 }
-                
+
                 const row = this.closest('tr');
                 const step = row.getAttribute('data-step');
-                
+
                 if (confirm(`Are you sure you want to remove the step "${step}"? This action cannot be undone.`)) {
                     // Send delete request to server
                     fetch('/remove_step', {
@@ -231,7 +246,7 @@
                             // Remove row from table
                             row.remove();
                             alert('Step removed successfully');
-                            
+
                             // Reload page to update order numbers
                             window.location.reload();
                         } else {
@@ -245,13 +260,13 @@
                 }
             });
         });
-        
+
         // Move step up
         document.querySelectorAll('.move-up-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const row = this.closest('tr');
                 const step = row.getAttribute('data-step');
-                
+
                 fetch('/move_step', {
                     method: 'POST',
                     headers: {
@@ -276,13 +291,13 @@
                 });
             });
         });
-        
+
         // Move step down
         document.querySelectorAll('.move-down-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const row = this.closest('tr');
                 const step = row.getAttribute('data-step');
-                
+
                 fetch('/move_step', {
                     method: 'POST',
                     headers: {
