@@ -12,7 +12,9 @@
             <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
             {% if is_admin %}
             <a href="{{ url_for('register') }}" class="btn btn-small">Register User</a>
+            <a href="{{ url_for('manage_users') }}" class="btn btn-small">Manage Users</a>
             <a href="{{ url_for('manage_steps') }}" class="btn btn-small">Manage Steps</a>
+            <a href="{{ url_for('manage_suppliers') }}" class="btn btn-small">Manage Suppliers</a>
             {% endif %}
         </div>
     </div>
@@ -122,10 +124,10 @@
                         <td>
                             {% set current_step = file.current_step %}
                             {% set ns = namespace(step_completed=true) %}
-                            
+
                             {% for step_name, entry in file.step_statuses.items() %}
                                 {% if entry.status != 'Completed' %}
-                                    
+
                                     {% set ns.step_completed = false %}
                                 {% endif %}
                             {% endfor %}
@@ -138,6 +140,9 @@
                         </td>
                         <td>
                             <a href="{{ url_for('file_pipeline', file_id=file_id) }}" class="btn btn-small">View Pipeline</a>
+                            {% if is_admin %}
+                            <button class="btn btn-small btn-danger delete-file-btn" data-file-id="{{ file_id }}" data-filename="{{ file.original_filename }}">Delete</button>
+                            {% endif %}
                         </td>
                     </tr>
                     {% else %}
@@ -168,6 +173,49 @@
             if (event.target === modal) {
                 modal.classList.add('hidden');
             }
+        });
+
+        // Delete file handling
+        document.querySelectorAll('.delete-file-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const fileId = this.getAttribute('data-file-id');
+                const filename = this.getAttribute('data-filename');
+
+                if (confirm(`Are you sure you want to delete the file "${filename}"? This action cannot be undone and will remove all associated data.`)) {
+                    // Send delete request to server
+                    fetch('/delete_file', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            file_id: fileId
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Remove row from table
+                            this.closest('tr').remove();
+                            alert('File deleted successfully');
+
+                            // If no more files, show the "No files" message
+                            const tbody = document.querySelector('.files-table tbody');
+                            if (tbody.children.length === 0) {
+                                const noDataRow = document.createElement('tr');
+                                noDataRow.innerHTML = '<td colspan="8" class="no-data">No files in process.</td>';
+                                tbody.appendChild(noDataRow);
+                            }
+                        } else {
+                            alert('Failed to delete file: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while deleting the file');
+                    });
+                }
+            });
         });
     </script>
 </body>

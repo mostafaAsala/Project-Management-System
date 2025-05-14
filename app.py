@@ -21,7 +21,7 @@ def _jinja2_filter_datetime(date, fmt=None):
     date = dateutil.parser.parse(date)
     native = date.replace(tzinfo=None)
     format='%Y-%m-%d, %H:%M'
-    return native.strftime(format) 
+    return native.strftime(format)
 
 
 # Custom filter to convert string to datetime for time difference calculation
@@ -466,6 +466,135 @@ def logout():
     session.pop('username', None)
     return redirect(url_for('login'))
 
+@app.route('/manage_users')
+def manage_users():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        flash('Only administrators can manage users')
+        return redirect(url_for('index'))
+
+    return render_template('manage_users.html',
+                          users=users_db,
+                          username=session['username'],
+                          is_admin=True)
+
+@app.route('/manage_suppliers')
+def manage_suppliers():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        flash('Only administrators can manage suppliers')
+        return redirect(url_for('index'))
+
+    # Count files per supplier
+    suppliers = {}
+    for _, file in files_db.items():
+        supplier = file.get('supplier', 'unknown')
+        if supplier in suppliers:
+            suppliers[supplier] += 1
+        else:
+            suppliers[supplier] = 1
+
+    return render_template('manage_suppliers.html',
+                          suppliers=suppliers,
+                          username=session['username'],
+                          is_admin=True)
+
+@app.route('/delete_supplier', methods=['POST'])
+def delete_supplier():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"success": False, "message": "Only administrators can delete suppliers"}), 403
+
+    data = request.json
+    supplier = data.get('supplier')
+
+    if not supplier:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    # Find all files for this supplier
+    files_to_delete = []
+    for file_id, file in files_db.items():
+        if file.get('supplier') == supplier:
+            files_to_delete.append(file_id)
+
+    if not files_to_delete:
+        return jsonify({"success": False, "message": "No files found for this supplier"}), 404
+
+    # Delete all files for this supplier
+    for file_id in files_to_delete:
+        file = files_db[file_id]
+
+        # Delete physical files from disk
+        for entry in file.get('history', []):
+            if entry.get('path') and os.path.exists(entry['path']):
+                try:
+                    os.remove(entry['path'])
+                except Exception as e:
+                    print(f"Error deleting file {entry['path']}: {e}")
+
+        # Remove file from database
+        del files_db[file_id]
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
+
+@app.route('/delete_user', methods=['POST'])
+def delete_user():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"success": False, "message": "Only administrators can delete users"}), 403
+
+    data = request.json
+    username_to_delete = data.get('username')
+
+    if not username_to_delete:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    if username_to_delete not in users_db:
+        return jsonify({"success": False, "message": "User not found"}), 404
+
+    # Cannot delete admin user
+    if username_to_delete == 'admin':
+        return jsonify({"success": False, "message": "Cannot delete the admin user"}), 403
+
+    # Cannot delete yourself
+    if username_to_delete == session['username']:
+        return jsonify({"success": False, "message": "Cannot delete your own account"}), 403
+
+    # Remove user from global step assignments
+    for step, users in step_assignments.items():
+        if username_to_delete in users:
+            users.remove(username_to_delete)
+
+    # Remove user from file-specific step assignments
+    for file_id, file in files_db.items():
+        if 'step_assignments' in file:
+            for step, users in file['step_assignments'].items():
+                if username_to_delete in users:
+                    users.remove(username_to_delete)
+
+    # Delete the user
+    del users_db[username_to_delete]
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if 'username' not in session or not users_db.get(session['username'], {}).get('is_admin', False):
@@ -516,7 +645,7 @@ def register():
             data_manager.mark_data_changed()
 
             flash('User registered successfully')
-            return redirect(url_for('index'))
+            return redirect(url_for('manage_users'))
 
     return render_template('register.html', steps=steps)
 
@@ -688,6 +817,96 @@ def get_files():
     if 'username' not in session:
         return jsonify({"error": "Not authenticated"}), 401
     return jsonify(files_db)
+
+@app.route('/delete_file', methods=['POST'])
+def delete_file():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"success": False, "message": "Only administrators can delete files"}), 403
+
+    data = request.json
+    file_id = data.get('file_id')
+
+    if not file_id:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    # Get file info for cleanup
+    file = files_db[file_id]
+
+    # Delete physical files from disk
+    for entry in file.get('history', []):
+        if entry.get('path') and os.path.exists(entry['path']):
+            try:
+                os.remove(entry['path'])
+            except Exception as e:
+                print(f"Error deleting file {entry['path']}: {e}")
+
+    # Remove file from database
+    del files_db[file_id]
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
+
+@app.route('/delete_step_file', methods=['POST'])
+def delete_step_file():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"success": False, "message": "Only administrators can delete files"}), 403
+
+    data = request.json
+    file_id = data.get('file_id')
+    step = data.get('step')
+    timestamp = data.get('timestamp')
+
+    if not all([file_id, step, timestamp]):
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    # Find the specific file entry in history
+    file = files_db[file_id]
+    entry_index = None
+
+    for i, entry in enumerate(file.get('history', [])):
+        if entry.get('step') == step and entry.get('timestamp') == timestamp:
+            entry_index = i
+            break
+
+    if entry_index is None:
+        return jsonify({"success": False, "message": "File version not found"}), 404
+
+    # Get the entry to delete
+    entry = file['history'][entry_index]
+
+    # Delete physical file from disk if it exists
+    if entry.get('path') and os.path.exists(entry['path']):
+        try:
+            os.remove(entry['path'])
+        except Exception as e:
+            print(f"Error deleting file {entry['path']}: {e}")
+
+    # Remove entry from history
+    file['history'].pop(entry_index)
+
+    # Update current step if needed
+    update_current_step(file_id)
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
 
 @app.route('/api/file_versions/<file_id>/<step>')
 def get_file_versions(file_id, step):

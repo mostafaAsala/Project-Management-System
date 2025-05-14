@@ -78,14 +78,14 @@
                     {% set ns = namespace(step_completed=true,completed_count=0) %}
                     {% set ns.step_completed = false %}
                     {% set ns.completed_count = 0 %}
-                    
+
                     {% for step_name, entry in file.step_statuses.items() %}
                         {% set ns.step_completed = false %}
                         {% if entry.status == 'Completed' %}
                             {% set ns.step_completed = true %}
                             {% set ns.completed_count = ns.completed_count + 1 %}
                         {% endif %}
-                    
+
 
                         <div class="progress-step
                             {% if step_completed %}completed{% endif %}
@@ -352,7 +352,16 @@
                                     <p><strong>User:</strong> ${version.user}</p>
                                     ${version.comment ? `<p><strong>Comment:</strong> ${version.comment}</p>` : ''}
                                 </div>
-                                <a href="/download/${version.file_id}/${version.step}" class="btn btn-small">Download</a>
+                                <div class="download-actions">
+                                    <a href="/download/${version.file_id}/${version.step}" class="btn btn-small">Download</a>
+                                    {% if is_admin %}
+                                    <button class="btn btn-small btn-danger delete-step-file-btn"
+                                        data-file-id="${version.file_id}"
+                                        data-step="${version.step}"
+                                        data-timestamp="${version.timestamp}"
+                                        data-filename="${version.filename}">Delete</button>
+                                    {% endif %}
+                                </div>
                             `;
                             downloadFilesList.appendChild(item);
                         });
@@ -456,6 +465,51 @@
             }
             if (event.target === manageUsersModal) {
                 manageUsersModal.classList.add('hidden');
+            }
+        });
+
+        // Delete step file handling
+        document.addEventListener('click', function(event) {
+            if (event.target.classList.contains('delete-step-file-btn')) {
+                const fileId = event.target.getAttribute('data-file-id');
+                const step = event.target.getAttribute('data-step');
+                const timestamp = event.target.getAttribute('data-timestamp');
+                const filename = event.target.getAttribute('data-filename');
+
+                if (confirm(`Are you sure you want to delete the file "${filename}" from step "${step}"? This action cannot be undone.`)) {
+                    // Send delete request to server
+                    fetch('/delete_step_file', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            file_id: fileId,
+                            step: step,
+                            timestamp: timestamp
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Remove item from list
+                            event.target.closest('.download-item').remove();
+
+                            // If no more files, show the "No files" message
+                            if (downloadFilesList.children.length === 0) {
+                                downloadFilesList.innerHTML = '<p>No files available for this step.</p>';
+                            }
+
+                            alert('File deleted successfully');
+                        } else {
+                            alert('Failed to delete file: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while deleting the file');
+                    });
+                }
             }
         });
     </script>

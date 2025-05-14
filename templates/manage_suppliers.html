@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Suppliers</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="header">
+        <h1>File Processing Pipeline</h1>
+        <div class="user-info">
+            <span>Welcome, {{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
+            <a href="{{ url_for('index') }}" class="btn btn-small">Back to Overview</a>
+        </div>
+    </div>
+    
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    
+    <div class="container">
+        <div class="actions-bar">
+            <h2>Manage Suppliers</h2>
+        </div>
+        
+        <div class="warning-box">
+            <p><strong>Warning:</strong> Deleting a supplier will remove all files associated with that supplier. This action cannot be undone.</p>
+        </div>
+        
+        <div class="table-container">
+            <table class="suppliers-table">
+                <thead>
+                    <tr>
+                        <th>Supplier Name</th>
+                        <th>Number of Files</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for supplier, count in suppliers.items() %}
+                    <tr>
+                        <td>{{ supplier|capitalize }}</td>
+                        <td>{{ count }}</td>
+                        <td>
+                            <button class="btn btn-small btn-danger delete-supplier-btn" data-supplier="{{ supplier }}">Delete</button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="3" class="no-data">No suppliers found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        // Delete supplier handling
+        document.querySelectorAll('.delete-supplier-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const supplier = this.getAttribute('data-supplier');
+                
+                if (confirm(`Are you sure you want to delete the supplier "${supplier}" and all associated files? This action cannot be undone.`)) {
+                    // Send delete request to server
+                    fetch('/delete_supplier', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            supplier: supplier
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Remove row from table
+                            this.closest('tr').remove();
+                            
+                            // If no more suppliers, show the "No suppliers" message
+                            const tbody = document.querySelector('.suppliers-table tbody');
+                            if (tbody.children.length === 0) {
+                                const noDataRow = document.createElement('tr');
+                                noDataRow.innerHTML = '<td colspan="3" class="no-data">No suppliers found.</td>';
+                                tbody.appendChild(noDataRow);
+                            }
+                            
+                            alert('Supplier and all associated files deleted successfully');
+                        } else {
+                            alert('Failed to delete supplier: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while deleting the supplier');
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>
