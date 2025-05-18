@@ -496,6 +496,77 @@
             }
         });
 
+        // Periodically update time worked for all steps
+        function updateStepTimes() {
+            console.log('Updating step times...');
+            fetch(`/api/step_times/{{ file_id }}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.step_times) {
+                    // Update each step's time worked display
+                    for (const [step, timeData] of Object.entries(data.step_times)) {
+                        // Find all pipeline steps
+                        const pipelineSteps = document.querySelectorAll('.pipeline-step');
+
+                        // Loop through each step to find the matching one
+                        pipelineSteps.forEach(pipelineStep => {
+                            const stepHeader = pipelineStep.querySelector('h3');
+                            if (stepHeader && stepHeader.textContent.toLowerCase() === step.toLowerCase()) {
+                                // Found the matching step, now find the time worked element
+                                const timeWorkedElements = pipelineStep.querySelectorAll('p strong');
+
+                                for (const strong of timeWorkedElements) {
+                                    if (strong.textContent === 'Time Worked:') {
+                                        // Found the time worked paragraph
+                                        const timeWorkedSpan = strong.parentElement.querySelector('span');
+                                        if (timeWorkedSpan) {
+                                            // Update the time worked value (first text node)
+                                            if (timeWorkedSpan.childNodes.length > 0) {
+                                                timeWorkedSpan.childNodes[0].nodeValue = `${timeData.total_time_worked} min`;
+                                            } else {
+                                                timeWorkedSpan.textContent = `${timeData.total_time_worked} min`;
+                                            }
+
+                                            // Update overdue status
+                                            if (timeData.is_overdue) {
+                                                timeWorkedSpan.classList.add('overdue');
+
+                                                // Add overdue indicator if it doesn't exist
+                                                let overdueIndicator = timeWorkedSpan.querySelector('.overdue-indicator');
+                                                if (!overdueIndicator) {
+                                                    overdueIndicator = document.createElement('span');
+                                                    overdueIndicator.className = 'overdue-indicator';
+                                                    overdueIndicator.title = 'Overdue! Assigned time exceeded.';
+                                                    overdueIndicator.textContent = '⚠️';
+                                                    timeWorkedSpan.appendChild(overdueIndicator);
+                                                }
+                                            } else {
+                                                timeWorkedSpan.classList.remove('overdue');
+
+                                                // Remove overdue indicator if it exists
+                                                const overdueIndicator = timeWorkedSpan.querySelector('.overdue-indicator');
+                                                if (overdueIndicator) {
+                                                    overdueIndicator.remove();
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error updating step times:', error);
+            });
+        }
+
+        // Update times immediately and then every minute
+        updateStepTimes();
+        setInterval(updateStepTimes, 60000); // 60000 ms = 1 minute
+
         // Delete step file handling
         document.addEventListener('click', function(event) {
             if (event.target.classList.contains('delete-step-file-btn')) {

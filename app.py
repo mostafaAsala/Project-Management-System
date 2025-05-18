@@ -176,7 +176,7 @@ def update_current_step(file_id):
             elif current_status == 'In Progress':
                 end_time = datetime.now()
                 total_time_minutes = (end_time - start_time).total_seconds() / 60
-            
+
             """if s in step_completion_times:  # If step is completed
                 end_time = datetime.fromisoformat(step_completion_times[s])
                 total_time_minutes = (end_time - start_time).total_seconds() / 60
@@ -1083,6 +1083,89 @@ def get_file_versions(file_id, step):
             versions.append(version_data)
 
     return jsonify({"versions": versions})
+
+@app.route('/api/step_times/<file_id>')
+def get_step_times(file_id):
+    """
+    API endpoint to get the current total time worked for all steps of a file.
+    This is used for real-time updates of the time worked display.
+    """
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if file_id not in files_db:
+        return jsonify({"error": "File not found"}), 404
+
+    file = files_db[file_id]
+    file_steps = file.get('custom_steps', steps)
+
+    # Calculate step times
+    step_times = {}
+
+    # Sort all history entries by timestamp
+    all_entries = file['history'].copy()
+    all_entries.sort(key=lambda x: datetime.fromisoformat(x['timestamp']))
+
+    # Find the completion time for each step
+    step_completion_times = {}
+    for entry in all_entries:
+        step = entry.get('step')
+        if step in file_steps:
+            # Check if this entry marks the step as completed
+            if entry.get('filename', '').startswith('Status update to Completed'):
+                step_completion_times[step] = entry['timestamp']
+
+    # Get current step statuses
+    step_statuses = {}
+    if 'step_statuses' in file:
+        for step in file_steps:
+            if step in file['step_statuses']:
+                if isinstance(file['step_statuses'][step], dict):
+                    step_statuses[step] = file['step_statuses'][step].get('status', 'Not Started')
+                else:
+                    step_statuses[step] = file['step_statuses'][step]
+            else:
+                step_statuses[step] = 'Not Started'
+
+    # Calculate total time worked for each step
+    for i, step in enumerate(file_steps):
+        total_time_minutes = 0
+        is_overdue = False
+        assigned_time = 0
+
+        # Get assigned time if available
+        if 'step_statuses' in file and step in file['step_statuses'] and isinstance(file['step_statuses'][step], dict):
+            assigned_time = file['step_statuses'][step].get('assigned_time', 0)
+
+        # Find when this step started (when previous step was completed)
+        start_time = None
+        if i > 0:  # If not the first step
+            prev_step = file_steps[i-1]
+            if prev_step in step_completion_times:
+                start_time = datetime.fromisoformat(step_completion_times[prev_step])
+        else:  # For the first step, use the first history entry time
+            if all_entries and all_entries[0]['step'] == step:
+                start_time = datetime.fromisoformat(all_entries[0]['timestamp'])
+
+        # If we have a start time, calculate the total time worked
+        if start_time:
+            if step_statuses.get(step) == 'Completed' and step in step_completion_times:
+                end_time = datetime.fromisoformat(step_completion_times[step])
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+            elif step_statuses.get(step) == 'In Progress':
+                end_time = datetime.now()
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+
+        # Check if overdue
+        is_overdue = assigned_time > 0 and total_time_minutes > assigned_time
+
+        # Add to result
+        step_times[step] = {
+            'total_time_worked': int(total_time_minutes),
+            'is_overdue': is_overdue
+        }
+    print(step_times)
+    return jsonify({"step_times": step_times})
 
 @app.route('/update_status', methods=['POST'])
 def update_status():

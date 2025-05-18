@@ -399,6 +399,46 @@
                 });
             });
         });
+
+        // Periodically update time worked for all steps
+        function updateStepTimes() {
+            fetch(`/api/step_times/{{ file_id }}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.step_times) {
+                    // Update each step's time worked display
+                    for (const [step, timeData] of Object.entries(data.step_times)) {
+                        // Find the row for this step
+                        const row = document.querySelector(`tr[data-step="${step}"]`);
+                        if (row) {
+                            // Find the time worked cell (6th column)
+                            const timeWorkedCell = row.cells[5];
+                            if (timeWorkedCell) {
+                                // Update the time worked value
+                                let timeWorkedText = `${timeData.total_time_worked} min`;
+
+                                // Update overdue status
+                                if (timeData.is_overdue) {
+                                    timeWorkedCell.classList.add('overdue');
+                                    timeWorkedText += ' <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>';
+                                } else {
+                                    timeWorkedCell.classList.remove('overdue');
+                                }
+
+                                timeWorkedCell.innerHTML = timeWorkedText;
+                            }
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error updating step times:', error);
+            });
+        }
+
+        // Update times immediately and then every minute
+        updateStepTimes();
+        setInterval(updateStepTimes, 60000); // 60000 ms = 1 minute
     </script>
 </body>
 </html>
