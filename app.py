@@ -777,7 +777,8 @@ def upload_file():
             file_step_statuses[s] = {
                 'status': 'Not Started',
                 'last_update': None,
-                'updated_by': None
+                'updated_by': None,
+                'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
             }
 
         # Set the current step to In Progress
@@ -785,7 +786,8 @@ def upload_file():
             file_step_statuses[file_steps[0]] = {
                 'status': 'In Progress',
                 'last_update': timestamp,
-                'updated_by': session['username']
+                'updated_by': session['username'],
+                'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
             }
 
         files_db[file_id] = {
@@ -1061,7 +1063,8 @@ def update_status():
             files_db[file_id]['step_statuses'][step] = {
                 'status': status,
                 'last_update': timestamp,
-                'updated_by': session['username']
+                'updated_by': session['username'],
+                'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
             }
         else:
             # Update the status, timestamp, and user
@@ -1079,6 +1082,56 @@ def update_status():
         print("updated step status")
         # Mark data as changed
         data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
+
+@app.route('/update_step_assigned_time', methods=['POST'])
+def update_step_assigned_time():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    data = request.json
+    file_id = data.get('file_id')
+    step = data.get('step')
+    assigned_time = data.get('assigned_time')
+
+    if not all([file_id, step]) or assigned_time is None:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    try:
+        assigned_time = int(assigned_time)
+        if assigned_time < 0:
+            return jsonify({"success": False, "message": "Assigned time must be a non-negative integer"}), 400
+    except ValueError:
+        return jsonify({"success": False, "message": "Assigned time must be a valid integer"}), 400
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    # Check if step is valid for this file
+    file_steps = files_db[file_id].get('custom_steps', steps)
+    if step not in file_steps:
+        return jsonify({"success": False, "message": "Invalid step for this file"}), 400
+
+    # Ensure file has step_statuses dictionary
+    if 'step_statuses' not in files_db[file_id]:
+        files_db[file_id]['step_statuses'] = {}
+
+    # Ensure the step has a status entry as a dictionary
+    if step not in files_db[file_id]['step_statuses'] or not isinstance(files_db[file_id]['step_statuses'][step], dict):
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+        files_db[file_id]['step_statuses'][step] = {
+            'status': 'Not Started',
+            'last_update': timestamp,
+            'updated_by': session['username'],
+            'assigned_time': assigned_time
+        }
+    else:
+        # Update the assigned time
+        files_db[file_id]['step_statuses'][step]['assigned_time'] = assigned_time
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
 
     return jsonify({"success": True})
 
@@ -1107,7 +1160,8 @@ def manage_file_steps(file_id):
         step_data = {
             'status': 'Not Started',
             'last_update': None,
-            'user': None
+            'user': None,
+            'total_time_worked': 0
         }
 
         # Use saved step status if available
@@ -1148,6 +1202,27 @@ def manage_file_steps(file_id):
             # Current step is in progress if not already completed
             if file['current_step'] == step and step_data['status'] != 'Completed':
                 step_data['status'] = 'In Progress'
+
+        # Calculate total time worked on this step
+        entries = [entry for entry in file['history'] if entry['step'] == step]
+        entries.sort(key=lambda x: datetime.fromisoformat(x['timestamp']))
+
+        total_time_minutes = 0
+        for i in range(1, len(entries)):
+            current_time = datetime.fromisoformat(entries[i]['timestamp'])
+            prev_time = datetime.fromisoformat(entries[i-1]['timestamp'])
+            time_diff = (current_time - prev_time).total_seconds() / 60  # Convert to minutes
+            total_time_minutes += time_diff
+
+        step_data['total_time_worked'] = int(total_time_minutes)
+
+        # Check if step is overdue
+        assigned_time = 0
+        if 'step_statuses' in file and step in file['step_statuses'] and isinstance(file['step_statuses'][step], dict):
+            assigned_time = file['step_statuses'][step].get('assigned_time', 0)
+
+        step_data['assigned_time'] = assigned_time
+        step_data['is_overdue'] = assigned_time > 0 and total_time_minutes > assigned_time
 
         step_statuses[step] = step_data
 
@@ -1212,7 +1287,8 @@ def add_file_step(file_id):
     file['step_statuses'][step_name] = {
         'status': 'Not Started',
         'last_update': timestamp,
-        'updated_by': session['username']
+        'updated_by': session['username'],
+        'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
     }
 
     # Ensure file has step_assignments
@@ -1403,7 +1479,8 @@ def reset_file_steps(file_id):
         files_db[file_id]['step_statuses'][s] = {
             'status': 'Not Started',
             'last_update': timestamp,
-            'updated_by': session['username']
+            'updated_by': session['username'],
+            'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
         }
 
     # Set current step to In Progress
@@ -1411,7 +1488,8 @@ def reset_file_steps(file_id):
         files_db[file_id]['step_statuses'][steps[0]] = {
             'status': 'In Progress',
             'last_update': timestamp,
-            'updated_by': session['username']
+            'updated_by': session['username'],
+            'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
         }
 
     # Mark data as changed
@@ -1503,4 +1581,4 @@ def manage_step_users(file_id):
     return redirect(url_for('file_pipeline', file_id=file_id))
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8001)
+    app.run(debug=True, host='0.0.0.0', port=8002)

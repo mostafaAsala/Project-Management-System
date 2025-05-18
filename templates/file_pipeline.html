@@ -3,6 +3,25 @@
 <head>
     <title>File Pipeline - {{ file.supplier }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .overdue {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .overdue-indicator {
+            color: #e74c3c;
+            font-size: 1.2em;
+            margin-left: 5px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+    </style>
 </head>
 <body>
     <div class="header">
@@ -102,6 +121,7 @@
             <div class="pipeline-container">
                 {% for step in steps %}
                     {% set step_data = step_statuses[step] %}
+                    {{step_statuses[step]}}
                     <div class="pipeline-step {% if step == file.current_step %}current{% endif %}" id="step-{{ loop.index }}">
                         <div class="pipeline-card">
                             <h3>{{ step|capitalize }}</h3>
@@ -121,6 +141,15 @@
                                     {% else %}
                                         None
                                     {% endif %}
+                                </p>
+                                <p><strong>Assigned Time:</strong> {{ step_data.assigned_time }} min</p>
+                                <p><strong>Time Worked:</strong>
+                                    <span class="{% if step_data.is_overdue %}overdue{% endif %}">
+                                        {{ step_data.total_time_worked }} min
+                                        {% if step_data.is_overdue %}
+                                            <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
+                                        {% endif %}
+                                    </span>
                                 </p>
                             </div>
                             <div class="card-actions">

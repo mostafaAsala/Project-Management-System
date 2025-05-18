@@ -16,7 +16,7 @@
             {% endif %}
         </div>
     </div>
-    
+
     {% with messages = get_flashed_messages() %}
     {% if messages %}
     <div class="flash-messages">
@@ -26,7 +26,7 @@
     </div>
     {% endif %}
     {% endwith %}
-    
+
     <div class="container">
         <div class="actions-bar">
             <h2>Manage Process Steps for {{ file.supplier }} - {{ file.original_filename }}</h2>
@@ -36,11 +36,11 @@
                 <button id="reset-steps-btn" class="btn btn-danger">Reset to Default</button>
             </div>
         </div>
-        
+
         <div class="file-info">
             <p><strong>File ID:</strong> {{ file_id }}</p>
             <p><strong>Current Step:</strong> {{ file.current_step|capitalize }}</p>
-            <p><strong>Last Update:</strong> 
+            <p><strong>Last Update:</strong>
                 {% if file.history|length > 0 %}
                     {{ file.history[-1].timestamp|strftime }}
                 {% else %}
@@ -48,12 +48,12 @@
                 {% endif %}
             </p>
         </div>
-        
+
         <div class="warning-box">
-            <p><strong>Warning:</strong> Changing the process steps will affect how this file progresses through the system. 
+            <p><strong>Warning:</strong> Changing the process steps will affect how this file progresses through the system.
             Be careful when removing steps, especially if they contain uploaded files.</p>
         </div>
-        
+
         <div class="table-container">
             <table class="steps-table">
                 <thead>
@@ -62,11 +62,14 @@
                         <th>Step Name</th>
                         <th>Status</th>
                         <th>Files</th>
+                        <th>Assigned Time (min)</th>
+                        <th>Total Time Worked</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="steps-tbody">
                     {% for step in file_steps %}
+                    
                     <tr data-step="{{ step }}">
                         <td>{{ loop.index }}</td>
                         <td>
@@ -86,6 +89,15 @@
                             {{ file_count }}
                         </td>
                         <td>
+                            <input type="number" class="assigned-time-input" data-step="{{ step }}" value="{{ step_statuses[step].get('assigned_time', 0) }}" min="0">
+                        </td>
+                        <td class="{% if step_statuses[step].is_overdue %}overdue{% endif %}">
+                            {{ step_statuses[step].total_time_worked }} min
+                            {% if step_statuses[step].is_overdue %}
+                                <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
+                            {% endif %}
+                        </td>
+                        <td>
                             <button class="btn btn-small edit-step-btn">Edit</button>
                             <button class="btn btn-small save-step-btn hidden">Save</button>
                             <button class="btn btn-small cancel-step-btn hidden">Cancel</button>
@@ -102,7 +114,7 @@
                 </tbody>
             </table>
         </div>
-        
+
         <!-- Add Step Modal -->
         <div id="add-step-modal" class="modal hidden">
             <div class="modal-content">
@@ -140,36 +152,63 @@
             </div>
         </div>
     </div>
-    
+
+    <style>
+        .overdue {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .overdue-indicator {
+            color: #e74c3c;
+            font-size: 1.2em;
+            margin-left: 5px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        .assigned-time-input {
+            width: 80px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+    </style>
+
     <script>
         // Add step modal
         const addStepModal = document.getElementById('add-step-modal');
         const addStepBtn = document.getElementById('add-step-btn');
-        
+
         addStepBtn.addEventListener('click', function() {
             addStepModal.classList.remove('hidden');
         });
-        
+
         document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
             element.addEventListener('click', function() {
                 addStepModal.classList.add('hidden');
             });
         });
-        
+
         // Close modal when clicking outside
         window.addEventListener('click', function(event) {
             if (event.target === addStepModal) {
                 addStepModal.classList.add('hidden');
             }
         });
-        
+
         // Reset steps to default
         document.getElementById('reset-steps-btn').addEventListener('click', function() {
             if (confirm('Are you sure you want to reset the steps to the default process? This action cannot be undone.')) {
                 window.location.href = "{{ url_for('reset_file_steps', file_id=file_id) }}";
             }
         });
-        
+
         // Edit step name
         document.querySelectorAll('.edit-step-btn').forEach(button => {
             button.addEventListener('click', function() {
@@ -181,7 +220,7 @@
                 row.querySelector('.cancel-step-btn').classList.remove('hidden');
             });
         });
-        
+
         // Cancel edit
         document.querySelectorAll('.cancel-step-btn').forEach(button => {
             button.addEventListener('click', function() {
@@ -191,25 +230,25 @@
                 row.querySelector('.edit-step-btn').classList.remove('hidden');
                 row.querySelector('.save-step-btn').classList.add('hidden');
                 row.querySelector('.cancel-step-btn').classList.add('hidden');
-                
+
                 // Reset input value to original
                 const originalName = row.querySelector('.step-name').textContent;
                 row.querySelector('.step-edit-input').value = originalName;
             });
         });
-        
+
         // Save step name
         document.querySelectorAll('.save-step-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const row = this.closest('tr');
                 const oldStep = row.getAttribute('data-step');
                 const newStep = row.querySelector('.step-edit-input').value.trim();
-                
+
                 if (newStep === '') {
                     alert('Step name cannot be empty');
                     return;
                 }
-                
+
                 // Send update to server
                 fetch('/rename_file_step/{{ file_id }}', {
                     method: 'POST',
@@ -232,7 +271,7 @@
                         row.querySelector('.edit-step-btn').classList.remove('hidden');
                         row.querySelector('.save-step-btn').classList.add('hidden');
                         row.querySelector('.cancel-step-btn').classList.add('hidden');
-                        
+
                         // Show success message
                         alert('Step renamed successfully');
                     } else {
@@ -245,7 +284,7 @@
                 });
             });
         });
-        
+
         // Remove step
         document.querySelectorAll('.remove-step-btn').forEach(button => {
             button.addEventListener('click', function() {
@@ -253,10 +292,10 @@
                     alert('Cannot remove the current step or a step with completed status.');
                     return;
                 }
-                
+
                 const row = this.closest('tr');
                 const step = row.getAttribute('data-step');
-                
+
                 if (confirm(`Are you sure you want to remove the step "${step}"? This action cannot be undone.`)) {
                     // Send delete request to server
                     fetch('/remove_file_step/{{ file_id }}', {
@@ -274,7 +313,7 @@
                             // Remove row from table
                             row.remove();
                             alert('Step removed successfully');
-                            
+
                             // Reload page to update order numbers
                             window.location.reload();
                         } else {
@@ -288,14 +327,14 @@
                 }
             });
         });
-        
+
         // Move step up/down
         document.querySelectorAll('.move-up-btn, .move-down-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const row = this.closest('tr');
                 const step = row.getAttribute('data-step');
                 const direction = this.classList.contains('move-up-btn') ? 'up' : 'down';
-                
+
                 fetch('/move_file_step/{{ file_id }}', {
                     method: 'POST',
                     headers: {
@@ -317,6 +356,46 @@
                 .catch(error => {
                     console.error('Error:', error);
                     alert('An error occurred while moving the step');
+                });
+            });
+        });
+
+        // Handle assigned time updates
+        document.querySelectorAll('.assigned-time-input').forEach(input => {
+            input.addEventListener('change', function() {
+                const step = this.getAttribute('data-step');
+                const assignedTime = parseInt(this.value, 10);
+
+                if (isNaN(assignedTime) || assignedTime < 0) {
+                    alert('Assigned time must be a non-negative number');
+                    this.value = 0;
+                    return;
+                }
+
+                // Send update to server
+                fetch('/update_step_assigned_time', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        file_id: '{{ file_id }}',
+                        step: step,
+                        assigned_time: assignedTime
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Reload page to update overdue status
+                        window.location.reload();
+                    } else {
+                        alert('Failed to update assigned time: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while updating the assigned time');
                 });
             });
         });
