@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Process Types</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .process-type-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .process-type-row input {
+            flex: 1;
+            margin-right: 10px;
+        }
+        .add-process-type-btn, .remove-process-type-btn {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            line-height: 1;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>File Processing Pipeline</h1>
+        <div class="user-info">
+            <span>Welcome, {{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
+            <a href="{{ url_for('index') }}" class="btn btn-small">Back to Overview</a>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="container">
+        <div class="actions-bar">
+            <h2>Manage Process Types</h2>
+        </div>
+
+        <div class="warning-box">
+            <p><strong>Warning:</strong> Changing process types will affect all files in the system.
+            Removing a process type will not delete associated files but may cause display issues.</p>
+        </div>
+
+        <div class="form-container">
+            <form action="{{ url_for('update_process_types') }}" method="post">
+                <div id="process-types-container">
+                    {% for type in process_types %}
+                    <div class="process-type-row">
+                        <input type="text" name="process_types[]" value="{{ type }}" required>
+                        <button type="button" class="btn remove-process-type-btn">-</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn add-process-type-btn">+ Add Process Type</button>
+                    <button type="submit" class="btn">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Add new process type row
+        document.querySelector('.add-process-type-btn').addEventListener('click', function() {
+            const container = document.getElementById('process-types-container');
+            const newRow = document.createElement('div');
+            newRow.className = 'process-type-row';
+            newRow.innerHTML = `
+                <input type="text" name="process_types[]" required>
+                <button type="button" class="btn remove-process-type-btn">-</button>
+            `;
+            container.appendChild(newRow);
+            
+            // Add event listener to the new remove button
+            newRow.querySelector('.remove-process-type-btn').addEventListener('click', removeProcessTypeRow);
+        });
+        
+        // Remove process type row
+        function removeProcessTypeRow() {
+            // Don't remove if it's the last row
+            const container = document.getElementById('process-types-container');
+            if (container.children.length > 1) {
+                this.closest('.process-type-row').remove();
+            } else {
+                alert('You must have at least one process type.');
+            }
+        }
+        
+        // Add event listeners to existing remove buttons
+        document.querySelectorAll('.remove-process-type-btn').forEach(button => {
+            button.addEventListener('click', removeProcessTypeRow);
+        });
+    </script>
+</body>
+</html>

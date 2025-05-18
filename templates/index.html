@@ -15,6 +15,7 @@
             <a href="{{ url_for('manage_users') }}" class="btn btn-small">Manage Users</a>
             <a href="{{ url_for('manage_steps') }}" class="btn btn-small">Manage Steps</a>
             <a href="{{ url_for('manage_suppliers') }}" class="btn btn-small">Manage Suppliers</a>
+            <a href="{{ url_for('manage_process_types') }}" class="btn btn-small">Manage Process Types</a>
             {% endif %}
         </div>
     </div>
@@ -47,6 +48,14 @@
                         <input type="text" id="supplier" name="supplier" required>
                     </div>
                     <div class="form-group">
+                        <label for="process_type">Process Type:</label>
+                        <select id="process_type" name="process_type">
+                            {% for type in process_types %}
+                            <option value="{{ type }}">{{ type }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label for="step">Initial Step:</label>
                         <select id="step" name="step">
                             {% for step in steps %}
@@ -75,6 +84,7 @@
                 <thead>
                     <tr>
                         <th>Supplier</th>
+                        <th>Process Type</th>
                         <th>Filename</th>
                         <th>Current Step</th>
                         <th>Creation Time</th>
@@ -88,6 +98,7 @@
                     {% for file_id, file in files.items() %}
                     <tr>
                         <td>{{ file.supplier }}</td>
+                        <td>{{ file.process_type|default('Unknown', true) }}</td>
                         <td>{{ file.original_filename }}</td>
                         <td>{{ file.current_step|capitalize }}</td>
                         <td>
@@ -147,7 +158,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="no-data">No files in process.</td>
+                        <td colspan="9" class="no-data">No files in process.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -31,7 +31,7 @@ def to_datetime(value):
     return datetime.fromisoformat(value)
 
 # Load data from files
-users_db, files_db, steps, step_assignments, custom_steps_list = data_manager.load_data()
+users_db, files_db, steps, step_assignments, custom_steps_list, process_types = data_manager.load_data()
 
 # Migrate existing files to add creation_time if missing
 def migrate_files_creation_time():
@@ -50,11 +50,11 @@ def migrate_files_creation_time():
 migrate_files_creation_time()
 
 # Start auto-save
-data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, interval=30)
+data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, interval=30)
 
 # Register function to save data when the application exits
 def save_data_on_exit():
-    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list)
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types)
     data_manager.stop_auto_save()
 
 atexit.register(save_data_on_exit)
@@ -173,6 +173,7 @@ def index():
     return render_template('index.html',
                           files=files_db,
                           steps=steps,
+                          process_types=process_types,
                           username=session['username'],
                           is_admin=users_db.get(session['username'], {}).get('is_admin', False))
 
@@ -525,6 +526,53 @@ def manage_suppliers():
                           username=session['username'],
                           is_admin=True)
 
+@app.route('/manage_process_types')
+def manage_process_types():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    print("first stage")
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        flash('Only administrators can manage process types')
+        return redirect(url_for('index'))
+    print("first stage")
+    return render_template('manage_process_types.html',
+                          process_types=process_types,
+                          username=session['username'],
+                          is_admin=True)
+
+@app.route('/update_process_types', methods=['POST'])
+def update_process_types():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        flash('Only administrators can manage process types')
+        return redirect(url_for('index'))
+
+    # Get the updated process types from the form
+    new_process_types = request.form.getlist('process_types[]')
+
+    # Filter out empty values
+    new_process_types = [pt.strip() for pt in new_process_types if pt.strip()]
+
+    # Ensure we have at least one process type
+    if not new_process_types:
+        flash('You must have at least one process type')
+        return redirect(url_for('manage_process_types'))
+
+    # Update the global process_types list
+    global process_types
+    process_types.clear()
+    process_types.extend(new_process_types)
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
+    flash('Process types updated successfully')
+    return redirect(url_for('manage_process_types'))
+
 @app.route('/delete_supplier', methods=['POST'])
 def delete_supplier():
     if 'username' not in session:
@@ -686,6 +734,7 @@ def upload_file():
 
     file = request.files['file']
     supplier = request.form.get('supplier', 'unknown')
+    process_type = request.form.get('process_type', process_types[0] if process_types else 'unknown')
     step = request.form.get('step', steps[0])
 
     # Check if user is authorized for this step
@@ -706,13 +755,13 @@ def upload_file():
     file.save(file_path)
     print(files_db)
     # Update database
-  
+
     if file_id not in files_db:
         if file_id == '':
             file_id = str(uuid.uuid4())
         # Create a copy of the default steps for this file
         file_steps = steps.copy()
- 
+
         # Create file-specific step assignments based on global roles and custom steps
         file_step_assignments = {}
         for s in file_steps:
@@ -741,6 +790,7 @@ def upload_file():
 
         files_db[file_id] = {
             'supplier': supplier,
+            'process_type': process_type,
             'original_filename': filename,
             'current_step': file_steps[0] if file_steps else step,  # Start with the first step by default
             'history': [],

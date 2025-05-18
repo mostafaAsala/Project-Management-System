@@ -12,6 +12,7 @@ FILES_DB_FILE = os.path.join(DATA_DIR, 'files_db.pkl')
 STEPS_FILE = os.path.join(DATA_DIR, 'steps.pkl')
 STEP_ASSIGNMENTS_FILE = os.path.join(DATA_DIR, 'step_assignments.pkl')
 CUSTOM_STEPS_FILE = os.path.join(DATA_DIR, 'custom_steps.pkl')
+PROCESS_TYPES_FILE = os.path.join(DATA_DIR, 'process_types.pkl')
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 
 # Ensure data directories exist
@@ -27,15 +28,16 @@ _stop_auto_save = threading.Event()
 def load_data():
     """
     Load all data from files.
-    Returns a tuple of (users_db, files_db, steps, step_assignments)
+    Returns a tuple of (users_db, files_db, steps, step_assignments, custom_steps_list, process_types)
     """
     users_db = load_users()
     files_db = load_files_db()
     steps_list = load_steps()
     step_assignments = load_step_assignments()
     custom_steps_list = load_custom_steps()
+    process_types = load_process_types()
 
-    return users_db, files_db, steps_list, step_assignments, custom_steps_list
+    return users_db, files_db, steps_list, step_assignments, custom_steps_list, process_types
 
 def load_custom_steps():
     """
@@ -51,7 +53,7 @@ def load_custom_steps():
     else:
         return []
 
-def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list=None):
+def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, process_types=None):
     """
     Save all data to files.
     """
@@ -62,6 +64,8 @@ def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_lis
     save_step_assignments(step_assignments)
     if custom_steps_list is not None:
         save_custom_steps(custom_steps_list)
+    if process_types is not None:
+        save_process_types(process_types)
     create_backup()
 
 def mark_data_changed():
@@ -179,6 +183,36 @@ def save_custom_steps(custom_steps_list):
     except Exception as e:
         print(f"Error saving custom steps data: {e}")
 
+def load_process_types():
+    """
+    Load process types list from file.
+    """
+    if os.path.exists(PROCESS_TYPES_FILE):
+        try:
+            with open(PROCESS_TYPES_FILE, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Error loading process types data: {e}")
+            return create_default_process_types()
+    else:
+        return create_default_process_types()
+
+def save_process_types(process_types):
+    """
+    Save process types list to file.
+    """
+    try:
+        with open(PROCESS_TYPES_FILE, 'wb') as f:
+            pickle.dump(process_types, f)
+    except Exception as e:
+        print(f"Error saving process types data: {e}")
+
+def create_default_process_types():
+    """
+    Create default process types list.
+    """
+    return ["PS", "Lam"]
+
 def create_default_users():
     """
     Create default users database.
@@ -222,7 +256,7 @@ def create_backup():
     os.makedirs(backup_folder, exist_ok=True)
 
     # Copy all data files to backup folder
-    for file_path in [USERS_FILE, FILES_DB_FILE, STEPS_FILE, STEP_ASSIGNMENTS_FILE]:
+    for file_path in [USERS_FILE, FILES_DB_FILE, STEPS_FILE, STEP_ASSIGNMENTS_FILE, CUSTOM_STEPS_FILE, PROCESS_TYPES_FILE]:
         if os.path.exists(file_path):
             try:
                 filename = os.path.basename(file_path)
@@ -232,7 +266,7 @@ def create_backup():
             except Exception as e:
                 print(f"Error creating backup for {file_path}: {e}")
 
-def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, interval=60):
+def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, process_types=None, interval=60):
     """
     Start auto-save thread that saves data at regular intervals if changes were made.
     """
@@ -250,7 +284,7 @@ def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_ste
             # Check if data has changed
             if _data_changed:
                 with _save_lock:
-                    save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list)
+                    save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list, process_types)
                     _data_changed = False
                     print(f"Auto-saved data at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
