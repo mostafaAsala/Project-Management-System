@@ -131,17 +131,81 @@ def update_current_step(file_id):
         file['step_statuses'] = {}
 
     # Update the file's step_statuses with the calculated values
-    for s in file_steps:
+    # First, find the completion time for each step
+    step_completion_times = {}
+
+    # Sort all history entries by timestamp
+    all_entries = file['history'].copy()
+    all_entries.sort(key=lambda x: datetime.fromisoformat(x['timestamp']))
+
+    # Find the completion time for each step
+    for entry in all_entries:
+        step = entry.get('step')
+        if step in file_steps:
+            # Check if this entry marks the step as completed
+            if entry.get('filename', '').startswith('Status update to Completed'):
+                step_completion_times[step] = entry['timestamp']
+
+    # Calculate total time worked for each step based on previous step completion
+    for i, s in enumerate(file_steps):
+        total_time_minutes = 0
+
+        # Get the current step status
+        current_status = step_statuses.get(s, 'Not Started')
+
+        # Find when this step started (when previous step was completed)
+        start_time = None
+        if i > 0:  # If not the first step
+            prev_step = file_steps[i-1]
+            prev_status = step_statuses.get(prev_step, 'Not Started')
+            if prev_status == 'Completed' and prev_step in step_completion_times:
+                start_time = datetime.fromisoformat(step_completion_times[prev_step])
+            else:
+                start_time = datetime.now()
+            """if prev_step in step_completion_times:
+                start_time = datetime.fromisoformat(step_completion_times[prev_step])"""
+        else:  # For the first step, use the first history entry time
+            if all_entries and all_entries[0]['step'] == s:
+                start_time = datetime.fromisoformat(all_entries[0]['timestamp'])
+        print("step___________________________________",s)
+        # If we have a start time, calculate the total time worked
+        if start_time:
+            if step_statuses[s] == 'Completed':
+                end_time = datetime.fromisoformat(step_completion_times[s])
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+            elif current_status == 'In Progress':
+                end_time = datetime.now()
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+            
+            """if s in step_completion_times:  # If step is completed
+                end_time = datetime.fromisoformat(step_completion_times[s])
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+            elif current_status == 'In Progress':  # If step is in progress
+                end_time = datetime.now()
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+            """
+
         # If we don't have an existing entry, create a new one with default values
         if s not in file['step_statuses'] or not isinstance(file['step_statuses'][s], dict):
             file['step_statuses'][s] = {
                 'status': step_statuses[s],
                 'last_update': step_last_updates.get(s, None),
-                'updated_by': step_users.get(s, None)
+                'updated_by': step_users.get(s, None),
+                'assigned_time': 0,  # Default assigned time
+                'total_time_worked': int(total_time_minutes)
             }
         else:
-            # Update only the status if the entry already exists as a dictionary
+            # Update the status if the entry already exists as a dictionary
             file['step_statuses'][s]['status'] = step_statuses[s]
+
+            # Update total_time_worked
+            file['step_statuses'][s]['total_time_worked'] = int(total_time_minutes)
+
+            # Get assigned time (or default to 0)
+            assigned_time = file['step_statuses'][s].get('assigned_time', 0)
+
+            # Update is_overdue flag
+            file['step_statuses'][s]['is_overdue'] = assigned_time > 0 and total_time_minutes > assigned_time
 
             # Update last_update and updated_by if we have newer information
             if s in step_last_updates:
@@ -426,6 +490,9 @@ def file_pipeline(file_id):
                 step_data['status'] = file['step_statuses'][step].get('status', 'Not Started')
                 step_data['last_update'] = file['step_statuses'][step].get('last_update')
                 step_data['user'] = file['step_statuses'][step].get('updated_by')
+                step_data['assigned_time'] = file['step_statuses'][step].get('assigned_time', 0)
+                step_data['total_time_worked'] = file['step_statuses'][step].get('total_time_worked', 0)
+                step_data['is_overdue'] = file['step_statuses'][step].get('is_overdue', False)
             else:
                 # For backward compatibility with old format where step_statuses just stored the status string
                 step_data['status'] = file['step_statuses'][step]
@@ -459,7 +526,7 @@ def file_pipeline(file_id):
                 step_data['status'] = 'In Progress'
 
         step_statuses[step] = step_data
-
+    print(step_statuses)
     return render_template('file_pipeline.html',
                           file=file,
                           file_id=file_id,
@@ -1120,15 +1187,78 @@ def update_step_assigned_time():
     # Ensure the step has a status entry as a dictionary
     if step not in files_db[file_id]['step_statuses'] or not isinstance(files_db[file_id]['step_statuses'][step], dict):
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+        # Calculate total time worked based on previous step completion
+        file = files_db[file_id]
+        file_steps = file.get('custom_steps', steps)
+
+        # First, find the completion time for each step
+        step_completion_times = {}
+
+        # Sort all history entries by timestamp
+        all_entries = file['history'].copy()
+        all_entries.sort(key=lambda x: datetime.fromisoformat(x['timestamp']))
+
+        # Find the completion time for each step
+        for entry in all_entries:
+            entry_step = entry.get('step')
+            if entry_step in file_steps:
+                # Check if this entry marks the step as completed
+                if entry.get('filename', '').startswith('Status update to Completed'):
+                    step_completion_times[entry_step] = entry['timestamp']
+
+        # Get the index of the current step
+        try:
+            step_index = file_steps.index(step)
+        except ValueError:
+            step_index = -1
+
+        total_time_minutes = 0
+
+        # Get the current step status
+        current_status = 'Not Started'
+        if 'step_statuses' in file and step in file['step_statuses']:
+            if isinstance(file['step_statuses'][step], dict):
+                current_status = file['step_statuses'][step].get('status', 'Not Started')
+            else:
+                current_status = file['step_statuses'][step]
+
+        # Find when this step started (when previous step was completed)
+        start_time = None
+        if step_index > 0:  # If not the first step
+            prev_step = file_steps[step_index-1]
+            if prev_step in step_completion_times:
+                start_time = datetime.fromisoformat(step_completion_times[prev_step])
+        else:  # For the first step, use the first history entry time
+            if all_entries and all_entries[0]['step'] == step:
+                start_time = datetime.fromisoformat(all_entries[0]['timestamp'])
+
+        # If we have a start time, calculate the total time worked
+        if start_time:
+            if step in step_completion_times:  # If step is completed
+                end_time = datetime.fromisoformat(step_completion_times[step])
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+            elif current_status == 'In Progress':  # If step is in progress
+                end_time = datetime.now()
+                total_time_minutes = (end_time - start_time).total_seconds() / 60
+
         files_db[file_id]['step_statuses'][step] = {
             'status': 'Not Started',
             'last_update': timestamp,
             'updated_by': session['username'],
-            'assigned_time': assigned_time
+            'assigned_time': assigned_time,
+            'total_time_worked': int(total_time_minutes),
+            'is_overdue': assigned_time > 0 and total_time_minutes > assigned_time
         }
     else:
         # Update the assigned time
         files_db[file_id]['step_statuses'][step]['assigned_time'] = assigned_time
+
+        # Get the total time worked
+        total_time_worked = files_db[file_id]['step_statuses'][step].get('total_time_worked', 0)
+
+        # Update the is_overdue flag
+        files_db[file_id]['step_statuses'][step]['is_overdue'] = assigned_time > 0 and total_time_worked > assigned_time
 
     # Mark data as changed
     data_manager.mark_data_changed()
@@ -1171,6 +1301,9 @@ def manage_file_steps(file_id):
                 step_data['status'] = file['step_statuses'][step].get('status', 'Not Started')
                 step_data['last_update'] = file['step_statuses'][step].get('last_update')
                 step_data['user'] = file['step_statuses'][step].get('updated_by')
+                step_data['total_time_worked'] = file['step_statuses'][step].get('total_time_worked', 0)
+                step_data['assigned_time'] = file['step_statuses'][step].get('assigned_time', 0)
+                step_data['is_overdue'] = file['step_statuses'][step].get('is_overdue', False)
             else:
                 # For backward compatibility with old format where step_statuses just stored the status string
                 step_data['status'] = file['step_statuses'][step]
@@ -1203,26 +1336,22 @@ def manage_file_steps(file_id):
             if file['current_step'] == step and step_data['status'] != 'Completed':
                 step_data['status'] = 'In Progress'
 
-        # Calculate total time worked on this step
-        entries = [entry for entry in file['history'] if entry['step'] == step]
-        entries.sort(key=lambda x: datetime.fromisoformat(x['timestamp']))
+        # If we don't have stored values for total_time_worked, assigned_time, or is_overdue,
+        # make sure they have default values
+        if 'total_time_worked' not in step_data:
+            step_data['total_time_worked'] = 0
 
-        total_time_minutes = 0
-        for i in range(1, len(entries)):
-            current_time = datetime.fromisoformat(entries[i]['timestamp'])
-            prev_time = datetime.fromisoformat(entries[i-1]['timestamp'])
-            time_diff = (current_time - prev_time).total_seconds() / 60  # Convert to minutes
-            total_time_minutes += time_diff
+        if 'assigned_time' not in step_data:
+            step_data['assigned_time'] = 0
 
-        step_data['total_time_worked'] = int(total_time_minutes)
+        if 'is_overdue' not in step_data:
+            step_data['is_overdue'] = False
 
-        # Check if step is overdue
-        assigned_time = 0
+        # Update the file's stored values to ensure they're up to date
         if 'step_statuses' in file and step in file['step_statuses'] and isinstance(file['step_statuses'][step], dict):
-            assigned_time = file['step_statuses'][step].get('assigned_time', 0)
-
-        step_data['assigned_time'] = assigned_time
-        step_data['is_overdue'] = assigned_time > 0 and total_time_minutes > assigned_time
+            file['step_statuses'][step]['total_time_worked'] = step_data['total_time_worked']
+            file['step_statuses'][step]['assigned_time'] = step_data['assigned_time']
+            file['step_statuses'][step]['is_overdue'] = step_data['is_overdue']
 
         step_statuses[step] = step_data
 
@@ -1288,7 +1417,9 @@ def add_file_step(file_id):
         'status': 'Not Started',
         'last_update': timestamp,
         'updated_by': session['username'],
-        'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
+        'assigned_time': 0,  # Default assigned time in minutes (0 means no time limit)
+        'total_time_worked': 0,  # Initialize total time worked to 0
+        'is_overdue': False  # Initialize overdue status to False
     }
 
     # Ensure file has step_assignments
@@ -1480,7 +1611,9 @@ def reset_file_steps(file_id):
             'status': 'Not Started',
             'last_update': timestamp,
             'updated_by': session['username'],
-            'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
+            'assigned_time': 0,  # Default assigned time in minutes (0 means no time limit)
+            'total_time_worked': 0,  # Initialize total time worked to 0
+            'is_overdue': False  # Initialize overdue status to False
         }
 
     # Set current step to In Progress
@@ -1489,7 +1622,9 @@ def reset_file_steps(file_id):
             'status': 'In Progress',
             'last_update': timestamp,
             'updated_by': session['username'],
-            'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
+            'assigned_time': 0,  # Default assigned time in minutes (0 means no time limit)
+            'total_time_worked': 0,  # Initialize total time worked to 0
+            'is_overdue': False  # Initialize overdue status to False
         }
 
     # Mark data as changed

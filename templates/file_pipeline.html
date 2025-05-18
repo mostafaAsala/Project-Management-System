@@ -121,7 +121,6 @@
             <div class="pipeline-container">
                 {% for step in steps %}
                     {% set step_data = step_statuses[step] %}
-                    {{step_statuses[step]}}
                     <div class="pipeline-step {% if step == file.current_step %}current{% endif %}" id="step-{{ loop.index }}">
                         <div class="pipeline-card">
                             <h3>{{ step|capitalize }}</h3>
@@ -145,7 +144,7 @@
                                 <p><strong>Assigned Time:</strong> {{ step_data.assigned_time }} min</p>
                                 <p><strong>Time Worked:</strong>
                                     <span class="{% if step_data.is_overdue %}overdue{% endif %}">
-                                        {{ step_data.total_time_worked }} min
+                                        {{ step_data.total_time_worked|int }} min
                                         {% if step_data.is_overdue %}
                                             <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
                                         {% endif %}
