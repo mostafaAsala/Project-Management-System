@@ -12,7 +12,8 @@ import data_manager
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 16MB max upload
+app.config['MAX_CONTENT_LENGTH'] = None  # No limit
 app.secret_key = os.urandom(24)  # For session management
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -1452,4 +1453,4 @@ def manage_step_users(file_id):
     return redirect(url_for('file_pipeline', file_id=file_id))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=8001)
