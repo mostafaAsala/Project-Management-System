@@ -57,6 +57,11 @@ def save_data_on_exit():
     data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types)
     data_manager.stop_auto_save()
 
+# Function to manually save all data
+def save_all_data():
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types)
+    data_manager.create_backup()
+
 atexit.register(save_data_on_exit)
 
 # Helper function to check if user is authorized for a step
@@ -228,6 +233,22 @@ def update_current_step(file_id):
         file['current_step'] = next_step
         # Mark data as changed
         data_manager.mark_data_changed()
+
+@app.route('/save_all_data', methods=['POST'])
+def save_all_data_route():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"success": False, "message": "Only administrators can save all data"}), 403
+
+    try:
+        # Call the save_all_data function
+        save_all_data()
+        return jsonify({"success": True, "message": "All data saved successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Error saving data: {str(e)}"}), 500
 
 @app.route('/')
 def index():
@@ -1831,4 +1852,4 @@ def manage_step_users(file_id):
     return redirect(url_for('file_pipeline', file_id=file_id))
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8002)
+    app.run(debug=True, host='0.0.0.0', port=5002)

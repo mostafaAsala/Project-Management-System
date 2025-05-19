@@ -27,6 +27,16 @@
             50% { opacity: 1; }
             100% { opacity: 0.5; }
         }
+
+        .btn-primary {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+
+        .btn-primary:hover {
+            background-color: #2980b9;
+        }
     </style>
 </head>
 <body>
@@ -58,7 +68,12 @@
     <div class="container">
         <div class="actions-bar">
             <h2>Files Overview</h2>
-            <button id="upload-new-btn" class="btn">Upload New File</button>
+            <div>
+                <button id="upload-new-btn" class="btn">Upload New File</button>
+                {% if is_admin %}
+                <button id="save-all-data-btn" class="btn btn-primary">Save All Data</button>
+                {% endif %}
+            </div>
         </div>
 
         <div id="upload-form-container" class="hidden modal">
@@ -159,7 +174,7 @@
                             {% endif %}
                         </td>
                         <td class="{% if current_step_times[file_id].is_overdue %}overdue{% endif %}">
-                            
+
                             {{ '%02d:%02d:%02d'|format(current_step_times[file_id].total_time_worked // 1440, (current_step_times[file_id].total_time_worked % 1440) // 60, current_step_times[file_id].total_time_worked % 60) }}
                             {% if current_step_times[file_id].is_overdue %}
                                 <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
@@ -207,6 +222,43 @@
         document.getElementById('upload-new-btn').addEventListener('click', function() {
             document.getElementById('upload-form-container').classList.remove('hidden');
         });
+
+        // Save all data button handler
+        const saveAllDataBtn = document.getElementById('save-all-data-btn');
+        if (saveAllDataBtn) {
+            saveAllDataBtn.addEventListener('click', function() {
+                // Show loading state
+                const originalText = this.textContent;
+                this.textContent = 'Saving...';
+                this.disabled = true;
+
+                // Send request to save all data
+                fetch('/save_all_data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('All data saved successfully');
+                    } else {
+                        alert('Failed to save data: ' + data.message);
+                    }
+                    // Reset button state
+                    this.textContent = originalText;
+                    this.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while saving data');
+                    // Reset button state
+                    this.textContent = originalText;
+                    this.disabled = false;
+                });
+            });
+        }
 
         document.querySelectorAll('.close-modal, .close-modal-btn').forEach(element => {
             element.addEventListener('click', function() {
