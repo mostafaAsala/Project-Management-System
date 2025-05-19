@@ -233,11 +233,12 @@ def update_current_step(file_id):
 def index():
     if 'username' not in session:
         return redirect(url_for('login'))
-
+    print("first stage")
     # Calculate current step time data for each file
     current_step_times = {}
     for file_id, file in files_db.items():
         current_step = file.get('current_step')
+        print("Current steps .......",current_step)
         if current_step and 'step_statuses' in file and current_step in file['step_statuses']:
             step_status = file['step_statuses'][current_step]
             if isinstance(step_status, dict):
@@ -1257,7 +1258,7 @@ def update_status():
         file_steps = files_db[file_id].get('custom_steps', steps)
 
         # If status is completed, update the current step
-        if status == 'Completed':
+        if status == 'Completed' or True:
             # Find the last completed step and set current step to the next one
             update_current_step(file_id)
         print("updated step status")

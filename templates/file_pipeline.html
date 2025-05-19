@@ -141,10 +141,10 @@
                                         None
                                     {% endif %}
                                 </p>
-                                <p><strong>Assigned Time:</strong> {{ step_data.assigned_time }} min</p>
+                                <p><strong>Assigned Time:</strong> {{ '%02d:%02d:%02d'|format(step_data.assigned_time // 1440, (step_data.assigned_time % 1440) // 60, step_data.assigned_time % 60) }}</p>
                                 <p><strong>Time Worked:</strong>
                                     <span class="{% if step_data.is_overdue %}overdue{% endif %}">
-                                        {{ step_data.total_time_worked|int }} min
+                                        {{ '%02d:%02d:%02d'|format(step_data.total_time_worked // 1440, (step_data.total_time_worked % 1440) // 60, step_data.total_time_worked % 60) }}
                                         {% if step_data.is_overdue %}
                                             <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
                                         {% endif %}
@@ -497,6 +497,19 @@
         });
 
         // Periodically update time worked for all steps
+        // Function to convert minutes to DD:HH:MM format
+        function minutesToTime(totalMinutes) {
+            if (isNaN(totalMinutes) || totalMinutes < 0) {
+                return '00:00:00';
+            }
+
+            const days = Math.floor(totalMinutes / (24 * 60));
+            const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+            const minutes = totalMinutes % 60;
+
+            return `${days.toString().padStart(2, '0')}:${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        }
+
         function updateStepTimes() {
             console.log('Updating step times...');
             fetch(`/api/step_times/{{ file_id }}`)
@@ -520,11 +533,14 @@
                                         // Found the time worked paragraph
                                         const timeWorkedSpan = strong.parentElement.querySelector('span');
                                         if (timeWorkedSpan) {
+                                            // Convert minutes to DD:HH:MM format
+                                            const formattedTime = minutesToTime(timeData.total_time_worked);
+
                                             // Update the time worked value (first text node)
                                             if (timeWorkedSpan.childNodes.length > 0) {
-                                                timeWorkedSpan.childNodes[0].nodeValue = `${timeData.total_time_worked} min`;
+                                                timeWorkedSpan.childNodes[0].nodeValue = formattedTime;
                                             } else {
-                                                timeWorkedSpan.textContent = `${timeData.total_time_worked} min`;
+                                                timeWorkedSpan.textContent = formattedTime;
                                             }
 
                                             // Update overdue status

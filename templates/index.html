@@ -159,12 +159,13 @@
                             {% endif %}
                         </td>
                         <td class="{% if current_step_times[file_id].is_overdue %}overdue{% endif %}">
-                            {{ current_step_times[file_id].total_time_worked|int }} min
+                            
+                            {{ '%02d:%02d:%02d'|format(current_step_times[file_id].total_time_worked // 1440, (current_step_times[file_id].total_time_worked % 1440) // 60, current_step_times[file_id].total_time_worked % 60) }}
                             {% if current_step_times[file_id].is_overdue %}
                                 <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
                             {% endif %}
                             {% if current_step_times[file_id].assigned_time > 0 %}
-                                <span class="assigned-time">({{ current_step_times[file_id].assigned_time }} min assigned)</span>
+                                <span class="assigned-time">({{ '%02d:%02d:%02d'|format(current_step_times[file_id].assigned_time // 1440, (current_step_times[file_id].assigned_time % 1440) // 60, current_step_times[file_id].assigned_time % 60) }} assigned)</span>
                             {% endif %}
                         </td>
                         <td>
@@ -221,6 +222,19 @@
             }
         });
 
+        // Function to convert minutes to DD:HH:MM format
+        function minutesToTime(totalMinutes) {
+            if (isNaN(totalMinutes) || totalMinutes < 0) {
+                return '00:00:00';
+            }
+
+            const days = Math.floor(totalMinutes / (24 * 60));
+            const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+            const minutes = totalMinutes % 60;
+
+            return `${days.toString().padStart(2, '0')}:${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        }
+
         // Periodically update current step times
         function updateCurrentStepTimes() {
             // Get all file rows
@@ -262,13 +276,18 @@
                                 // Get the current step time cell (8th column, index 7)
                                 const timeCell = row.cells[7];
                                 if (timeCell) {
+                                    // Convert minutes to DD:HH:MM format
+                                    const totalTimeWorked = timeData.total_time_worked;
+                                    const formattedTime = minutesToTime(totalTimeWorked);
+
                                     // Update the time worked value
-                                    let timeWorkedText = `${timeData.total_time_worked} min`;
+                                    let timeWorkedText = formattedTime;
 
                                     // Add assigned time if available
                                     const assignedTime = timeData.assigned_time || 0;
                                     if (assignedTime > 0) {
-                                        timeWorkedText += ` <span class="assigned-time">(${assignedTime} min assigned)</span>`;
+                                        const formattedAssignedTime = minutesToTime(assignedTime);
+                                        timeWorkedText += ` <span class="assigned-time">(${formattedAssignedTime} assigned)</span>`;
                                     }
 
                                     // Add overdue indicator if needed
