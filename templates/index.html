@@ -3,6 +3,31 @@
 <head>
     <title>File Processing Pipeline</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .overdue {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .overdue-indicator {
+            color: #e74c3c;
+            font-size: 1.2em;
+            margin-left: 5px;
+            animation: pulse 1s infinite;
+        }
+
+        .assigned-time {
+            font-size: 0.85em;
+            color: #666;
+            margin-left: 5px;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+    </style>
 </head>
 <body>
     <div class="header">
@@ -90,6 +115,7 @@
                         <th>Creation Time</th>
                         <th>Last Update</th>
                         <th>Total Time</th>
+                        <th>Current Step Time</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -132,6 +158,15 @@
                                 N/A
                             {% endif %}
                         </td>
+                        <td class="{% if current_step_times[file_id].is_overdue %}overdue{% endif %}">
+                            {{ current_step_times[file_id].total_time_worked|int }} min
+                            {% if current_step_times[file_id].is_overdue %}
+                                <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>
+                            {% endif %}
+                            {% if current_step_times[file_id].assigned_time > 0 %}
+                                <span class="assigned-time">({{ current_step_times[file_id].assigned_time }} min assigned)</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% set current_step = file.current_step %}
                             {% set ns = namespace(step_completed=true) %}
@@ -158,7 +193,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="no-data">No files in process.</td>
+                        <td colspan="10" class="no-data">No files in process.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -185,6 +220,80 @@
                 modal.classList.add('hidden');
             }
         });
+
+        // Periodically update current step times
+        function updateCurrentStepTimes() {
+            // Get all file rows
+            const fileRows = document.querySelectorAll('.files-table tbody tr');
+
+            // For each file row, fetch the latest time data
+            fileRows.forEach(row => {
+                // Skip the "No files" row
+                if (row.querySelector('.no-data')) {
+                    return;
+                }
+
+                // Get the file ID from the delete button or view pipeline link
+                let fileId = null;
+                const deleteBtn = row.querySelector('.delete-file-btn');
+                if (deleteBtn) {
+                    fileId = deleteBtn.getAttribute('data-file-id');
+                } else {
+                    const viewLink = row.querySelector('a[href*="file_pipeline"]');
+                    if (viewLink) {
+                        const href = viewLink.getAttribute('href');
+                        fileId = href.split('/').pop();
+                    }
+                }
+
+                if (fileId) {
+                    // Fetch the latest time data for this file
+                    fetch(`/api/step_times/${fileId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.step_times) {
+                            // Get the current step
+                            const currentStepCell = row.cells[3];
+                            const currentStep = currentStepCell.textContent.trim().toLowerCase();
+
+                            // Find the time data for the current step
+                            const timeData = data.step_times[currentStep];
+                            if (timeData) {
+                                // Get the current step time cell (8th column, index 7)
+                                const timeCell = row.cells[7];
+                                if (timeCell) {
+                                    // Update the time worked value
+                                    let timeWorkedText = `${timeData.total_time_worked} min`;
+
+                                    // Add assigned time if available
+                                    const assignedTime = timeData.assigned_time || 0;
+                                    if (assignedTime > 0) {
+                                        timeWorkedText += ` <span class="assigned-time">(${assignedTime} min assigned)</span>`;
+                                    }
+
+                                    // Add overdue indicator if needed
+                                    if (timeData.is_overdue) {
+                                        timeCell.classList.add('overdue');
+                                        timeWorkedText += ` <span class="overdue-indicator" title="Overdue! Assigned time exceeded.">⚠️</span>`;
+                                    } else {
+                                        timeCell.classList.remove('overdue');
+                                    }
+
+                                    timeCell.innerHTML = timeWorkedText;
+                                }
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error updating step times:', error);
+                    });
+                }
+            });
+        }
+
+        // Update times immediately and then every minute
+        updateCurrentStepTimes();
+        setInterval(updateCurrentStepTimes, 60000); // 60000 ms = 1 minute
 
         // Delete file handling
         document.querySelectorAll('.delete-file-btn').forEach(button => {
@@ -214,7 +323,7 @@
                             const tbody = document.querySelector('.files-table tbody');
                             if (tbody.children.length === 0) {
                                 const noDataRow = document.createElement('tr');
-                                noDataRow.innerHTML = '<td colspan="8" class="no-data">No files in process.</td>';
+                                noDataRow.innerHTML = '<td colspan="10" class="no-data">No files in process.</td>';
                                 tbody.appendChild(noDataRow);
                             }
                         } else {

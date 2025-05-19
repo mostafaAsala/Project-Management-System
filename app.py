@@ -234,10 +234,41 @@ def index():
     if 'username' not in session:
         return redirect(url_for('login'))
 
+    # Calculate current step time data for each file
+    current_step_times = {}
+    for file_id, file in files_db.items():
+        current_step = file.get('current_step')
+        if current_step and 'step_statuses' in file and current_step in file['step_statuses']:
+            step_status = file['step_statuses'][current_step]
+            if isinstance(step_status, dict):
+                total_time_worked = step_status.get('total_time_worked', 0)
+                assigned_time = step_status.get('assigned_time', 0)
+                is_overdue = assigned_time > 0 and total_time_worked > assigned_time
+
+                current_step_times[file_id] = {
+                    'total_time_worked': total_time_worked,
+                    'assigned_time': assigned_time,
+                    'is_overdue': is_overdue
+                }
+            else:
+                # Handle legacy format
+                current_step_times[file_id] = {
+                    'total_time_worked': 0,
+                    'assigned_time': 0,
+                    'is_overdue': False
+                }
+        else:
+            current_step_times[file_id] = {
+                'total_time_worked': 0,
+                'assigned_time': 0,
+                'is_overdue': False
+            }
+
     return render_template('index.html',
                           files=files_db,
                           steps=steps,
                           process_types=process_types,
+                          current_step_times=current_step_times,
                           username=session['username'],
                           is_admin=users_db.get(session['username'], {}).get('is_admin', False))
 
