@@ -33,6 +33,11 @@ def to_datetime(value):
 # Load data from files
 users_db, files_db, steps, step_assignments, custom_steps_list, process_types = data_manager.load_data()
 
+# Initialize default assigned times for steps (in minutes)
+default_assigned_times = data_manager.load_default_assigned_times()
+if not default_assigned_times:
+    default_assigned_times = {step: 0 for step in steps}  # Default to 0 minutes for all steps
+
 # Migrate existing files to add creation_time if missing
 def migrate_files_creation_time():
     for _, file in files_db.items():
@@ -50,16 +55,16 @@ def migrate_files_creation_time():
 migrate_files_creation_time()
 
 # Start auto-save
-data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, interval=30)
+data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times, interval=30)
 
 # Register function to save data when the application exits
 def save_data_on_exit():
-    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types)
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times)
     data_manager.stop_auto_save()
 
 # Function to manually save all data
 def save_all_data():
-    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types)
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times)
     data_manager.create_backup()
 
 atexit.register(save_data_on_exit)
@@ -89,10 +94,8 @@ def is_authorized_for_step(username, step, file_id=None):
 # Helper function to count files in each step
 def count_files_in_steps():
     step_counts = {step: 0 for step in steps}
-    print(steps)
     for _, file in files_db.items():
         current_step = file.get('current_step')
-        print(current_step)
         if current_step in step_counts:
             step_counts[current_step] += 1
 
@@ -172,7 +175,6 @@ def update_current_step(file_id):
         else:  # For the first step, use the first history entry time
             if all_entries and all_entries[0]['step'] == s:
                 start_time = datetime.fromisoformat(all_entries[0]['timestamp'])
-        print("step___________________________________",s)
         # If we have a start time, calculate the total time worked
         if start_time:
             if step_statuses[s] == 'Completed':
@@ -311,8 +313,41 @@ def manage_steps():
                           steps=steps,
                           step_counts=step_counts,
                           custom_steps=custom_steps_list,
+                          default_assigned_times=default_assigned_times,
                           username=session['username'],
                           is_admin=True)
+
+@app.route('/update_default_assigned_time', methods=['POST'])
+def update_default_assigned_time():
+    if 'username' not in session:
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    # Check if user is admin
+    if not users_db.get(session['username'], {}).get('is_admin', False):
+        return jsonify({"success": False, "message": "Only administrators can update default assigned times"}), 403
+
+    data = request.json
+    step = data.get('step')
+    assigned_time = data.get('assigned_time')
+
+    if not step or assigned_time is None:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    try:
+        assigned_time = int(assigned_time)
+        if assigned_time < 0:
+            return jsonify({"success": False, "message": "Assigned time must be a non-negative integer"}), 400
+    except ValueError:
+        return jsonify({"success": False, "message": "Assigned time must be a valid integer"}), 400
+
+    # Update the default assigned time for the step
+    global default_assigned_times
+    default_assigned_times[step] = assigned_time
+
+    # Mark data as changed
+    data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
 
 @app.route('/add_step', methods=['POST'])
 def add_step():
@@ -326,6 +361,7 @@ def add_step():
 
     step_name = request.form.get('step_name', '').strip().lower()
     step_position = request.form.get('step_position', 'end')
+    default_assigned_time = request.form.get('default_assigned_time', '00:00:00')
 
     if not step_name:
         flash('Step name cannot be empty')
@@ -334,6 +370,27 @@ def add_step():
     if step_name in steps:
         flash(f'Step "{step_name}" already exists')
         return redirect(url_for('manage_steps'))
+
+    # Convert default assigned time from DD:HH:MM to minutes
+    try:
+        # Parse the DD:HH:MM format
+        parts = default_assigned_time.split(':')
+        if len(parts) != 3:
+            raise ValueError("Invalid time format")
+
+        days = int(parts[0])
+        hours = int(parts[1])
+        minutes = int(parts[2])
+
+        # Validate ranges
+        if hours >= 24 or minutes >= 60:
+            raise ValueError("Invalid time values")
+
+        # Convert to total minutes
+        assigned_time_minutes = days * 24 * 60 + hours * 60 + minutes
+    except ValueError:
+        # If there's an error, default to 0 minutes
+        assigned_time_minutes = 0
 
     # Add step at specified position
     if step_position == 'start':
@@ -357,6 +414,9 @@ def add_step():
     # Add to custom steps list
     if step_name not in custom_steps_list:
         custom_steps_list.append(step_name)
+
+    # Set default assigned time
+    default_assigned_times[step_name] = assigned_time_minutes
 
     # Mark data as changed
     data_manager.mark_data_changed()
@@ -414,6 +474,10 @@ def rename_step():
         custom_steps_list.remove(old_step)
         custom_steps_list.append(new_step)
 
+    # Update default assigned time
+    if old_step in default_assigned_times:
+        default_assigned_times[new_step] = default_assigned_times.pop(old_step)
+
     # Mark data as changed
     data_manager.mark_data_changed()
 
@@ -457,6 +521,10 @@ def remove_step():
     # Remove step from custom steps list if it's there
     if step in custom_steps_list:
         custom_steps_list.remove(step)
+
+    # Remove default assigned time for this step
+    if step in default_assigned_times:
+        del default_assigned_times[step]
 
     # Remove step from file history (but keep the entries for record)
 
@@ -512,10 +580,8 @@ def file_pipeline(file_id):
         return redirect(url_for('index'))
 
     file = files_db[file_id]
-    print(file)
     # Use file's custom steps if available, otherwise use default steps
     file_steps = file.get('custom_steps', steps)
-    print(file_steps)
     # Ensure file has step_assignments
     if 'step_assignments' not in file:
         file['step_assignments'] = {}
@@ -579,7 +645,6 @@ def file_pipeline(file_id):
                 step_data['status'] = 'In Progress'
 
         step_statuses[step] = step_data
-    print(step_statuses)
     return render_template('file_pipeline.html',
                           file=file,
                           file_id=file_id,
@@ -873,7 +938,6 @@ def upload_file():
     # Save file with unique name
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{filename}")
     file.save(file_path)
-    print(files_db)
     # Update database
 
     if file_id not in files_db:
@@ -894,20 +958,30 @@ def upload_file():
         # Initialize step_statuses for all steps
         file_step_statuses = {}
         for s in file_steps:
+            # Use the default assigned time for this step if available
+            default_time = default_assigned_times.get(s, 0)
+
             file_step_statuses[s] = {
                 'status': 'Not Started',
                 'last_update': None,
                 'updated_by': None,
-                'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
+                'assigned_time': default_time,  # Use the default assigned time from global settings
+                'total_time_worked': 0,  # Initialize total time worked to 0
+                'is_overdue': False  # Initialize overdue status to False
             }
 
         # Set the current step to In Progress
         if file_steps:
+            # Use the default assigned time for the first step if available
+            default_time = default_assigned_times.get(file_steps[0], 0)
+
             file_step_statuses[file_steps[0]] = {
                 'status': 'In Progress',
                 'last_update': timestamp,
                 'updated_by': session['username'],
-                'assigned_time': 0  # Default assigned time in minutes (0 means no time limit)
+                'assigned_time': default_time,  # Use the default assigned time from global settings
+                'total_time_worked': 0,  # Initialize total time worked to 0
+                'is_overdue': False  # Initialize overdue status to False
             }
 
         files_db[file_id] = {
@@ -1205,7 +1279,7 @@ def get_step_times(file_id):
             if step_statuses.get(step) == 'Completed' and step in step_completion_times:
                 end_time = datetime.fromisoformat(step_completion_times[step])
                 total_time_minutes = (end_time - start_time).total_seconds() / 60
-            elif step_statuses.get(step) == 'In Progress':
+            elif step_statuses.get(step) == 'In Progress' or step_statuses.get(step) == 'Not Started':
                 end_time = datetime.now()
                 total_time_minutes = (end_time - start_time).total_seconds() / 60
 
@@ -1217,7 +1291,6 @@ def get_step_times(file_id):
             'total_time_worked': int(total_time_minutes),
             'is_overdue': is_overdue
         }
-    print(step_times)
     return jsonify({"step_times": step_times})
 
 @app.route('/update_status', methods=['POST'])
@@ -1549,11 +1622,15 @@ def add_file_step(file_id):
 
     # Initialize the status for the new step with timestamp and user
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    # Use the default assigned time for this step if available
+    default_time = default_assigned_times.get(step_name, 0)
+
     file['step_statuses'][step_name] = {
         'status': 'Not Started',
         'last_update': timestamp,
         'updated_by': session['username'],
-        'assigned_time': 0,  # Default assigned time in minutes (0 means no time limit)
+        'assigned_time': default_time,  # Use the default assigned time from global settings
         'total_time_worked': 0,  # Initialize total time worked to 0
         'is_overdue': False  # Initialize overdue status to False
     }
@@ -1743,22 +1820,28 @@ def reset_file_steps(file_id):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     files_db[file_id]['step_statuses'] = {}
     for s in steps:
+        # Use the default assigned time for this step if available
+        default_time = default_assigned_times.get(s, 0)
+
         files_db[file_id]['step_statuses'][s] = {
             'status': 'Not Started',
             'last_update': timestamp,
             'updated_by': session['username'],
-            'assigned_time': 0,  # Default assigned time in minutes (0 means no time limit)
+            'assigned_time': default_time,  # Use the default assigned time from global settings
             'total_time_worked': 0,  # Initialize total time worked to 0
             'is_overdue': False  # Initialize overdue status to False
         }
 
     # Set current step to In Progress
     if steps:
+        # Use the default assigned time for the first step if available
+        default_time = default_assigned_times.get(steps[0], 0)
+
         files_db[file_id]['step_statuses'][steps[0]] = {
             'status': 'In Progress',
             'last_update': timestamp,
             'updated_by': session['username'],
-            'assigned_time': 0,  # Default assigned time in minutes (0 means no time limit)
+            'assigned_time': default_time,  # Use the default assigned time from global settings
             'total_time_worked': 0,  # Initialize total time worked to 0
             'is_overdue': False  # Initialize overdue status to False
         }
@@ -1853,3 +1936,35 @@ def manage_step_users(file_id):
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5002)
+
+
+
+
+
+"""
+ERROR:app:Exception on /download/ffa308ea-ef9a-4118-802b-95f99c7dddc8/offline creation [GET]
+Traceback (most recent call last):
+  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 2070, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 1515, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 1513, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 1499, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**req.view_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Mostafa\PROF_SER\PIPELINE-FOR-DF\app.py", line 1092, in download_file
+    return send_file(entry['path'], as_attachment=True,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\helpers.py", line 612, in send_file
+    return werkzeug.utils.send_file(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\werkzeug\utils.py", line 746, in send_file
+    file = open(path, "rb")  # type: ignore
+           ^^^^^^^^^^^^^^^^
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+"""

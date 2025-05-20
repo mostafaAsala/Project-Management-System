@@ -14,6 +14,19 @@
             margin-left: 8px;
             vertical-align: middle;
         }
+
+        .time-input-container {
+            display: flex;
+            align-items: center;
+        }
+
+        .assigned-time-input {
+            width: 100px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -54,6 +67,7 @@
                         <th>Order</th>
                         <th>Step Name</th>
                         <th>Files in Step</th>
+                        <th>Default Assigned Time (DD:HH:MM)</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -69,6 +83,13 @@
                             <input type="text" class="step-edit-input hidden" value="{{ step }}">
                         </td>
                         <td>{{ step_counts[step] }}</td>
+                        <td>
+                            <div class="time-input-container">
+                                <input type="text" class="assigned-time-input" data-step="{{ step }}"
+                                    value="{{ '%02d:%02d:%02d'|format(default_assigned_times[step] // 1440, (default_assigned_times[step] % 1440) // 60, default_assigned_times[step] % 60) if step in default_assigned_times else '00:00:00' }}"
+                                    placeholder="DD:HH:MM" pattern="[0-9]{2}:[0-9]{2}:[0-9]{2}">
+                            </div>
+                        </td>
                         <td>
                             <button class="btn btn-small edit-step-btn">Edit</button>
                             <button class="btn btn-small save-step-btn hidden">Save</button>
@@ -110,6 +131,11 @@
                                 {% endfor %}
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label for="default_assigned_time">Default Assigned Time (DD:HH:MM):</label>
+                            <input type="text" id="default_assigned_time" name="default_assigned_time" value="00:00:00" pattern="[0-9]{2}:[0-9]{2}:[0-9]{2}" placeholder="DD:HH:MM">
+                            <small>Format: Days:Hours:Minutes (e.g., 00:05:30 for 5 hours and 30 minutes)</small>
+                        </div>
                         <div class="form-actions">
                             <button type="submit" class="btn">Add Step</button>
                             <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
@@ -121,6 +147,42 @@
     </div>
 
     <script>
+        // Function to convert DD:HH:MM format to minutes
+        function timeToMinutes(timeStr) {
+            // Check if the format is correct
+            const regex = /^(\d{2}):(\d{2}):(\d{2})$/;
+            const match = timeStr.match(regex);
+
+            if (!match) {
+                return null; // Invalid format
+            }
+
+            const days = parseInt(match[1], 10);
+            const hours = parseInt(match[2], 10);
+            const minutes = parseInt(match[3], 10);
+
+            // Validate ranges
+            if (hours >= 24 || minutes >= 60) {
+                return null; // Invalid time values
+            }
+
+            // Convert to total minutes
+            return days * 24 * 60 + hours * 60 + minutes;
+        }
+
+        // Function to convert minutes to DD:HH:MM format
+        function minutesToTime(totalMinutes) {
+            if (isNaN(totalMinutes) || totalMinutes < 0) {
+                return '00:00:00';
+            }
+
+            const days = Math.floor(totalMinutes / (24 * 60));
+            const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+            const minutes = totalMinutes % 60;
+
+            return `${days.toString().padStart(2, '0')}:${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        }
+
         // Add step modal
         const addStepModal = document.getElementById('add-step-modal');
         const addStepBtn = document.getElementById('add-step-btn');
@@ -319,6 +381,55 @@
                 .catch(error => {
                     console.error('Error:', error);
                     alert('An error occurred while moving the step');
+                });
+            });
+        });
+
+        // Handle default assigned time updates
+        document.querySelectorAll('.assigned-time-input').forEach(input => {
+            input.addEventListener('change', function() {
+                const step = this.getAttribute('data-step');
+                const timeValue = this.value.trim();
+
+                // Validate format
+                if (!timeValue.match(/^\d{2}:\d{2}:\d{2}$/)) {
+                    alert('Please enter time in DD:HH:MM format (e.g., 00:05:30 for 5 hours and 30 minutes)');
+                    this.value = '00:00:00';
+                    return;
+                }
+
+                // Convert to minutes
+                const assignedTimeMinutes = timeToMinutes(timeValue);
+
+                if (assignedTimeMinutes === null) {
+                    alert('Invalid time format. Please use DD:HH:MM where HH < 24 and MM < 60');
+                    this.value = '00:00:00';
+                    return;
+                }
+
+                // Send update to server
+                fetch('/update_default_assigned_time', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        step: step,
+                        assigned_time: assignedTimeMinutes
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Show success message
+                        alert('Default assigned time updated successfully');
+                    } else {
+                        alert('Failed to update default assigned time: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while updating the default assigned time');
                 });
             });
         });
