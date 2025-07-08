@@ -37,6 +37,40 @@
         .btn-primary:hover {
             background-color: #2980b9;
         }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading-text {
+            display: none;
+        }
+
+        .is-loading .loading-text {
+            display: inline;
+        }
+
+        .is-loading .normal-text {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -112,7 +146,11 @@
                         <input type="file" id="file" name="file" required>
                     </div>
                     <div class="form-actions">
-                        <button type="submit" class="btn">Upload</button>
+                        <button type="submit" id="upload-submit-btn" class="btn">
+                            <span class="spinner" style="display: none;"></span>
+                            <span class="normal-text">Upload</span>
+                            <span class="loading-text">Uploading...</span>
+                        </button>
                         <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
                     </div>
                 </form>
@@ -220,6 +258,16 @@
     <script>
         // Show/hide upload form
         document.getElementById('upload-new-btn').addEventListener('click', function() {
+            // Reset the form
+            document.getElementById('upload-form').reset();
+
+            // Reset the upload button state
+            const submitBtn = document.getElementById('upload-submit-btn');
+            submitBtn.classList.remove('is-loading');
+            submitBtn.disabled = false;
+            submitBtn.querySelector('.spinner').style.display = 'none';
+
+            // Show the form
             document.getElementById('upload-form-container').classList.remove('hidden');
         });
 
@@ -264,6 +312,20 @@
             element.addEventListener('click', function() {
                 document.getElementById('upload-form-container').classList.add('hidden');
             });
+        });
+
+        // Handle form submission with loading indicator
+        document.getElementById('upload-form').addEventListener('submit', function(e) {
+            const submitBtn = document.getElementById('upload-submit-btn');
+            const spinner = submitBtn.querySelector('.spinner');
+
+            // Show loading state
+            submitBtn.classList.add('is-loading');
+            submitBtn.disabled = true;
+            spinner.style.display = 'inline-block';
+
+            // Form will submit normally
+            // The loading state will remain until the page reloads with the response
         });
 
         // Close modal when clicking outside

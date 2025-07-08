@@ -103,36 +103,47 @@ def count_files_in_steps():
 
 # Helper function to update the current step based on completed steps
 def update_current_step(file_id):
+    print(f"\n[EXECUTING] update_current_step({file_id}) - Updating current step")
     if file_id not in files_db:
+        print(f"[STEP] File {file_id} not found in database, returning")
         return
 
     file = files_db[file_id]
     file_steps = file.get('custom_steps', steps)
+    print(f"[STEP] File steps: {file_steps}")
 
     # Create a dictionary to track the status of each step
     step_statuses = {}
     for s in file_steps:
         step_statuses[s] = 'Not Started'
+    print(f"[STEP] Initialized step statuses: {step_statuses}")
 
     # Create dictionaries to track the status, last update time, and user for each step
     step_last_updates = {}
     step_users = {}
+    print(f"[STEP] Initialized tracking dictionaries")
 
     # Update statuses based on history
+    print(f"[STEP] Updating statuses based on history entries: {len(file['history'])}")
     for entry in file['history']:
         if entry['step'] in step_statuses:
+            print(f"[STEP] Processing history entry for step: {entry['step']}, timestamp: {entry['timestamp']}")
             # Update timestamp and user if this is a newer entry
             if entry['step'] not in step_last_updates or entry['timestamp'] > step_last_updates[entry['step']]:
                 step_last_updates[entry['step']] = entry['timestamp']
                 step_users[entry['step']] = entry['user']
+                print(f"[STEP] Updated last update time for step {entry['step']} to {entry['timestamp']} by {entry['user']}")
 
             if entry.get('filename', '').startswith('Status update to '):
                 status = entry['filename'].replace('Status update to ', '')
                 step_statuses[entry['step']] = status
+                print(f"[STEP] Updated status for step {entry['step']} to '{status}' based on status update entry")
             elif entry.get('path'):  # If there's a file upload, mark as in progress
                 step_statuses[entry['step']] = 'In Progress'
+                print(f"[STEP] Updated status for step {entry['step']} to 'In Progress' based on file upload")
             else:
                 step_statuses[entry['step']] = 'Completed'
+                print(f"[STEP] Updated status for step {entry['step']} to 'Completed' based on other entry type")
 
     # Ensure file has step_statuses dictionary
     if 'step_statuses' not in file:
@@ -220,21 +231,27 @@ def update_current_step(file_id):
                 file['step_statuses'][s]['updated_by'] = step_users[s]
 
     # Find the first non-completed step
+    print(f"[STEP] Finding the first non-completed step")
     next_step = None
     for s in file_steps:
         if step_statuses[s] != 'Completed':
             next_step = s
+            print(f"[STEP] Found first non-completed step: {next_step}")
             break
 
     # If all steps are completed, set to the last step
     if next_step is None and file_steps:
         next_step = file_steps[-1]
+        print(f"[STEP] All steps completed, setting to last step: {next_step}")
 
     # Update the current step
     if next_step is not None and file['current_step'] != next_step:
+        print(f"[STEP] Updating current step from {file['current_step']} to {next_step}")
         file['current_step'] = next_step
         # Mark data as changed
         data_manager.mark_data_changed()
+    else:
+        print(f"[STEP] Current step remains unchanged: {file.get('current_step')}")
 
 @app.route('/save_all_data', methods=['POST'])
 def save_all_data_route():
@@ -254,20 +271,24 @@ def save_all_data_route():
 
 @app.route('/')
 def index():
+    print("\n[EXECUTING] index() - Main page route")
     if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
-    print("first stage")
+
+    print("[STEP] Calculating current step time data for each file")
     # Calculate current step time data for each file
     current_step_times = {}
     for file_id, file in files_db.items():
         current_step = file.get('current_step')
-        print("Current steps .......",current_step)
+        print(f"[STEP] Processing file {file_id} - Current step: {current_step}")
         if current_step and 'step_statuses' in file and current_step in file['step_statuses']:
             step_status = file['step_statuses'][current_step]
             if isinstance(step_status, dict):
                 total_time_worked = step_status.get('total_time_worked', 0)
                 assigned_time = step_status.get('assigned_time', 0)
                 is_overdue = assigned_time > 0 and total_time_worked > assigned_time
+                print(f"[STEP] File {file_id} - Step {current_step} - Time worked: {total_time_worked} min - Assigned time: {assigned_time} min - Overdue: {is_overdue}")
 
                 current_step_times[file_id] = {
                     'total_time_worked': total_time_worked,
@@ -276,12 +297,14 @@ def index():
                 }
             else:
                 # Handle legacy format
+                print(f"[STEP] File {file_id} - Step {current_step} - Legacy format detected")
                 current_step_times[file_id] = {
                     'total_time_worked': 0,
                     'assigned_time': 0,
                     'is_overdue': False
                 }
         else:
+            print(f"[STEP] File {file_id} - No current step or step status information")
             current_step_times[file_id] = {
                 'total_time_worked': 0,
                 'assigned_time': 0,
@@ -572,18 +595,25 @@ def move_step():
 
 @app.route('/file/<file_id>')
 def file_pipeline(file_id):
+    print(f"\n[EXECUTING] file_pipeline({file_id}) - File pipeline view")
     if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
 
     if file_id not in files_db:
+        print(f"[STEP] File {file_id} not found in database")
         flash('File not found')
         return redirect(url_for('index'))
 
+    print(f"[STEP] Retrieving file data for {file_id}")
     file = files_db[file_id]
     # Use file's custom steps if available, otherwise use default steps
     file_steps = file.get('custom_steps', steps)
+    print(f"[STEP] File steps: {file_steps}")
+
     # Ensure file has step_assignments
     if 'step_assignments' not in file:
+        print(f"[STEP] Creating step assignments for file {file_id}")
         file['step_assignments'] = {}
         for s in file_steps:
             file['step_assignments'][s] = []
@@ -591,16 +621,21 @@ def file_pipeline(file_id):
                 # Check if step is in user's roles or custom steps
                 if s in user_data.get('roles', []) or s in user_data.get('custom_steps', []):
                     file['step_assignments'][s].append(username)
+    else:
+        print(f"[STEP] Using existing step assignments for file {file_id}")
 
+    print(f"[STEP] Building step statuses for file {file_id}")
     # Get status for each step in the pipeline
     step_statuses = {}
     for step in file_steps:
+        print(f"[STEP] Processing step: {step}")
         step_data = {
             'status': 'Not Started',
             'last_update': None,
             'user': None,
             'can_edit': is_authorized_for_step(session['username'], step, file_id)
         }
+        print(f"[STEP] User {session['username']} can edit step {step}: {step_data['can_edit']}")
 
         # Use saved step status if available
         if 'step_statuses' in file and step in file['step_statuses']:
@@ -713,14 +748,18 @@ def manage_suppliers():
 
 @app.route('/manage_process_types')
 def manage_process_types():
+    print("\n[EXECUTING] manage_process_types() - Managing process types")
     if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
-    print("first stage")
+
     # Check if user is admin
     if not users_db.get(session['username'], {}).get('is_admin', False):
+        print(f"[STEP] User {session['username']} is not an admin, redirecting to index")
         flash('Only administrators can manage process types')
         return redirect(url_for('index'))
-    print("first stage")
+
+    print(f"[STEP] Rendering manage process types page with {len(process_types)} process types")
     return render_template('manage_process_types.html',
                           process_types=process_types,
                           username=session['username'],
@@ -910,10 +949,13 @@ def register():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    print("\n[EXECUTING] upload_file() - Uploading new file")
     if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
 
     if 'file' not in request.files:
+        print("[STEP] No file part in request")
         flash('No file part')
         return redirect(url_for('index'))
 
@@ -921,32 +963,43 @@ def upload_file():
     supplier = request.form.get('supplier', 'unknown')
     process_type = request.form.get('process_type', process_types[0] if process_types else 'unknown')
     step = request.form.get('step', steps[0])
+    print(f"[STEP] Upload details - Supplier: {supplier}, Process Type: {process_type}, Step: {step}, Filename: {file.filename}")
 
     # Check if user is authorized for this step
     if not is_authorized_for_step(session['username'], step):
+        print(f"[STEP] User {session['username']} not authorized for step {step}")
         flash(f'You are not authorized to upload files for the {step} step')
         return redirect(url_for('index'))
 
     if file.filename == '':
+        print("[STEP] No selected file (empty filename)")
         flash('No selected file')
         return redirect(url_for('index'))
 
     file_id = request.form.get('file_id', str(uuid.uuid4()))
     filename = secure_filename(file.filename)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+    print(f"[STEP] Generated file_id: {file_id}, Secured filename: {filename}, Timestamp: {timestamp}")
 
     # Save file with unique name
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{filename}")
+    print(f"[STEP] Saving file to path: {file_path}")
     file.save(file_path)
+    print(f"[STEP] File saved successfully")
     # Update database
+    print(f"[STEP] Updating database for file_id: {file_id}")
 
     if file_id not in files_db:
+        print(f"[STEP] Creating new file entry in database")
         if file_id == '':
             file_id = str(uuid.uuid4())
+            print(f"[STEP] Generated new file_id: {file_id}")
         # Create a copy of the default steps for this file
         file_steps = steps.copy()
+        print(f"[STEP] Using default steps for file: {file_steps}")
 
         # Create file-specific step assignments based on global roles and custom steps
+        print(f"[STEP] Creating file-specific step assignments")
         file_step_assignments = {}
         for s in file_steps:
             file_step_assignments[s] = []
@@ -954,12 +1007,15 @@ def upload_file():
                 # Check if step is in user's roles or custom steps
                 if s in user_data.get('roles', []) or s in user_data.get('custom_steps', []):
                     file_step_assignments[s].append(username)
+            print(f"[STEP] Step '{s}' assigned to users: {file_step_assignments[s]}")
 
         # Initialize step_statuses for all steps
+        print(f"[STEP] Initializing step statuses")
         file_step_statuses = {}
         for s in file_steps:
             # Use the default assigned time for this step if available
             default_time = default_assigned_times.get(s, 0)
+            print(f"[STEP] Step '{s}' default assigned time: {default_time} minutes")
 
             file_step_statuses[s] = {
                 'status': 'Not Started',
@@ -972,6 +1028,7 @@ def upload_file():
 
         # Set the current step to In Progress
         if file_steps:
+            print(f"[STEP] Setting first step '{file_steps[0]}' to In Progress")
             # Use the default assigned time for the first step if available
             default_time = default_assigned_times.get(file_steps[0], 0)
 
@@ -984,6 +1041,7 @@ def upload_file():
                 'is_overdue': False  # Initialize overdue status to False
             }
 
+        print(f"[STEP] Creating complete file entry in database")
         files_db[file_id] = {
             'supplier': supplier,
             'process_type': process_type,
@@ -995,7 +1053,9 @@ def upload_file():
             'step_statuses': file_step_statuses,  # Add step statuses
             'creation_time': timestamp  # Store creation time
         }
+        print(f"[STEP] File entry created with current_step: {files_db[file_id]['current_step']}")
 
+    print(f"[STEP] Adding history entry for step: {step}")
     files_db[file_id]['history'].append({
         'step': step,
         'timestamp': timestamp,
@@ -1004,20 +1064,26 @@ def upload_file():
         'user': session['username']
     })
 
+    print(f"[STEP] Setting current step to: {step}")
     files_db[file_id]['current_step'] = step
 
     # Mark data as changed
+    print(f"[STEP] Marking data as changed")
     data_manager.mark_data_changed()
 
+    print(f"[STEP] Upload complete, redirecting to index")
     flash('File uploaded successfully')
     return redirect(url_for('index'))
 
 @app.route('/upload_to_step', methods=['POST'])
 def upload_to_step():
+    print("\n[EXECUTING] upload_to_step() - Uploading file to specific step")
     if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
 
     if 'file' not in request.files:
+        print("[STEP] No file part in request")
         flash('No file part')
         return redirect(url_for('index'))
 
@@ -1025,33 +1091,42 @@ def upload_to_step():
     file_id = request.form.get('file_id')
     step = request.form.get('step')
     comment = request.form.get('comment', '')
+    print(f"[STEP] Upload details - File ID: {file_id}, Step: {step}, Filename: {file.filename}, Comment: {comment}")
 
     # Validate inputs
     if not file_id or not step:
+        print("[STEP] Missing required parameters")
         flash('Missing required parameters')
         return redirect(url_for('index'))
 
     if file_id not in files_db:
+        print(f"[STEP] File {file_id} not found in database")
         flash('File not found')
         return redirect(url_for('index'))
 
     # Check if user is authorized for this step
     if not is_authorized_for_step(session['username'], step, file_id):
+        print(f"[STEP] User {session['username']} not authorized for step {step}")
         flash(f'You are not authorized to upload files for the {step} step')
         return redirect(url_for('file_pipeline', file_id=file_id))
 
     if file.filename == '':
+        print("[STEP] No selected file (empty filename)")
         flash('No selected file')
         return redirect(url_for('file_pipeline', file_id=file_id))
 
     filename = secure_filename(file.filename)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+    print(f"[STEP] Secured filename: {filename}, Timestamp: {timestamp}")
 
     # Save file with unique name
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{timestamp.replace(':', '_').replace('.', '_')}_{filename}")
+    print(f"[STEP] Saving file to path: {file_path}")
     file.save(file_path)
+    print(f"[STEP] File saved successfully")
 
     # Add entry to history
+    print(f"[STEP] Adding history entry for step: {step}")
     files_db[file_id]['history'].append({
         'step': step,
         'timestamp': timestamp,
@@ -1062,29 +1137,42 @@ def upload_to_step():
     })
 
     # Update the current step based on completed steps
+    print(f"[STEP] Updating current step based on completed steps")
     update_current_step(file_id)
 
     # Mark data as changed
+    print(f"[STEP] Marking data as changed")
     data_manager.mark_data_changed()
 
+    print(f"[STEP] Upload to step complete, redirecting to file pipeline")
     flash('File uploaded successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
 
 @app.route('/download/<file_id>/<step>')
 def download_file(file_id, step):
+    print(f"\n[EXECUTING] download_file({file_id}, {step}) - Downloading file for step")
     if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
 
     if file_id not in files_db:
+        print(f"[STEP] File {file_id} not found in database")
         flash('File not found')
         return redirect(url_for('index'))
 
+    print(f"[STEP] Searching for file version in step: {step}")
     # Find the file version for the requested step
     for entry in reversed(files_db[file_id]['history']):
         if entry['step'] == step:
-            return send_file(entry['path'], as_attachment=True,
-                            download_name=entry['filename'])
+            print(f"[STEP] Found file version - Filename: {entry.get('filename')}, Path: {entry.get('path')}")
+            if entry.get('path'):
+                print(f"[STEP] Sending file: {entry['path']}")
+                return send_file(entry['path'], as_attachment=True,
+                                download_name=entry['filename'])
+            else:
+                print(f"[STEP] Entry has no path, might be a status update")
 
+    print(f"[STEP] No file version found for step: {step}")
     flash('Version not found')
     return redirect(url_for('index'))
 
@@ -1217,16 +1305,21 @@ def get_step_times(file_id):
     API endpoint to get the current total time worked for all steps of a file.
     This is used for real-time updates of the time worked display.
     """
+    print(f"\n[EXECUTING] get_step_times({file_id}) - Getting step times for file")
     if 'username' not in session:
+        print("[STEP] User not in session, returning authentication error")
         return jsonify({"error": "Not authenticated"}), 401
 
     if file_id not in files_db:
+        print(f"[STEP] File {file_id} not found in database")
         return jsonify({"error": "File not found"}), 404
 
     file = files_db[file_id]
     file_steps = file.get('custom_steps', steps)
+    print(f"[STEP] File steps: {file_steps}")
 
     # Calculate step times
+    print(f"[STEP] Calculating step times for file {file_id}")
     step_times = {}
 
     # Sort all history entries by timestamp
@@ -1256,6 +1349,7 @@ def get_step_times(file_id):
 
     # Calculate total time worked for each step
     for i, step in enumerate(file_steps):
+        print(f"[STEP] Calculating time for step: {step} (index {i})")
         total_time_minutes = 0
         is_overdue = False
         assigned_time = 0
@@ -1263,6 +1357,7 @@ def get_step_times(file_id):
         # Get assigned time if available
         if 'step_statuses' in file and step in file['step_statuses'] and isinstance(file['step_statuses'][step], dict):
             assigned_time = file['step_statuses'][step].get('assigned_time', 0)
+            print(f"[STEP] Step '{step}' assigned time: {assigned_time} minutes")
 
         # Find when this step started (when previous step was completed)
         start_time = None
@@ -1270,58 +1365,76 @@ def get_step_times(file_id):
             prev_step = file_steps[i-1]
             if prev_step in step_completion_times:
                 start_time = datetime.fromisoformat(step_completion_times[prev_step])
+                print(f"[STEP] Step '{step}' start time based on previous step completion: {start_time}")
         else:  # For the first step, use the first history entry time
             if all_entries and all_entries[0]['step'] == step:
                 start_time = datetime.fromisoformat(all_entries[0]['timestamp'])
+                print(f"[STEP] First step '{step}' start time based on first history entry: {start_time}")
 
         # If we have a start time, calculate the total time worked
         if start_time:
             if step_statuses.get(step) == 'Completed' and step in step_completion_times:
                 end_time = datetime.fromisoformat(step_completion_times[step])
                 total_time_minutes = (end_time - start_time).total_seconds() / 60
+                print(f"[STEP] Step '{step}' is completed - End time: {end_time}, Total time: {int(total_time_minutes)} minutes")
             elif step_statuses.get(step) == 'In Progress' or step_statuses.get(step) == 'Not Started':
                 end_time = datetime.now()
                 total_time_minutes = (end_time - start_time).total_seconds() / 60
+                print(f"[STEP] Step '{step}' is in progress - Current time: {end_time}, Total time so far: {int(total_time_minutes)} minutes")
+        else:
+            print(f"[STEP] No start time found for step '{step}', cannot calculate time worked")
 
         # Check if overdue
         is_overdue = assigned_time > 0 and total_time_minutes > assigned_time
+        if is_overdue:
+            print(f"[STEP] Step '{step}' is OVERDUE - Worked: {int(total_time_minutes)} min, Assigned: {assigned_time} min")
 
         # Add to result
         step_times[step] = {
             'total_time_worked': int(total_time_minutes),
             'is_overdue': is_overdue
         }
+        print(f"[STEP] Added time data for step '{step}': {step_times[step]}")
     return jsonify({"step_times": step_times})
 
 @app.route('/update_status', methods=['POST'])
 def update_status():
-    print("update step status first")
+    print("\n[EXECUTING] update_status() - Updating step status")
     if 'username' not in session:
+        print("[STEP] User not in session, returning authentication error")
         return jsonify({"success": False, "message": "Not authenticated"}), 401
 
     data = request.json
     file_id = data.get('file_id')
     step = data.get('step')
     status = data.get('status')
+    print(f"[STEP] Update status request - File ID: {file_id}, Step: {step}, Status: {status}")
 
     if not all([file_id, step, status]):
+        print("[STEP] Missing required fields in request")
         return jsonify({"success": False, "message": "Missing required fields"}), 400
 
     if file_id not in files_db:
+        print(f"[STEP] File {file_id} not found in database")
         return jsonify({"success": False, "message": "File not found"}), 404
 
     # Check if step is valid for this file
     file_steps = files_db[file_id].get('custom_steps', steps)
+    print(f"[STEP] File steps: {file_steps}")
     if step not in file_steps:
+        print(f"[STEP] Step {step} is not valid for this file")
         return jsonify({"success": False, "message": "Invalid step for this file"}), 400
 
     if not is_authorized_for_step(session['username'], step, file_id):
+        print(f"[STEP] User {session['username']} not authorized to update step {step}")
         return jsonify({"success": False, "message": "Not authorized to update this step"}), 403
 
     # Update the file status
+    print(f"[STEP] Updating file status to: {status}")
     if status == 'Completed' or status == 'In Progress' or status == 'Not Started':
         # Add a status update entry to history
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+        print(f"[STEP] Creating history entry with timestamp: {timestamp}")
         files_db[file_id]['history'].append({
             'step': step,
             'timestamp': timestamp,
@@ -1332,10 +1445,12 @@ def update_status():
 
         # Ensure file has step_statuses dictionary
         if 'step_statuses' not in files_db[file_id]:
+            print(f"[STEP] Creating step_statuses dictionary for file {file_id}")
             files_db[file_id]['step_statuses'] = {}
 
         # Ensure the step has a status entry as a dictionary
         if step not in files_db[file_id]['step_statuses'] or not isinstance(files_db[file_id]['step_statuses'][step], dict):
+            print(f"[STEP] Creating new status entry for step {step}")
             files_db[file_id]['step_statuses'][step] = {
                 'status': status,
                 'last_update': timestamp,
@@ -1344,20 +1459,25 @@ def update_status():
             }
         else:
             # Update the status, timestamp, and user
+            print(f"[STEP] Updating existing status entry for step {step}")
             files_db[file_id]['step_statuses'][step]['status'] = status
             files_db[file_id]['step_statuses'][step]['last_update'] = timestamp
             files_db[file_id]['step_statuses'][step]['updated_by'] = session['username']
 
         # Get file's custom steps
         file_steps = files_db[file_id].get('custom_steps', steps)
+        print(f"[STEP] File steps: {file_steps}")
 
         # If status is completed, update the current step
         if status == 'Completed' or True:
+            print(f"[STEP] Status is '{status}', updating current step")
             # Find the last completed step and set current step to the next one
             update_current_step(file_id)
-        print("updated step status")
+
         # Mark data as changed
+        print(f"[STEP] Marking data as changed")
         data_manager.mark_data_changed()
+        print(f"[STEP] Status update complete")
 
     return jsonify({"success": True})
 
@@ -1941,30 +2061,4 @@ if __name__ == '__main__':
 
 
 
-"""
-ERROR:app:Exception on /download/ffa308ea-ef9a-4118-802b-95f99c7dddc8/offline creation [GET]
-Traceback (most recent call last):
-  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 2070, in wsgi_app
-    response = self.full_dispatch_request()
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 1515, in full_dispatch_request
-    rv = self.handle_user_exception(e)
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 1513, in full_dispatch_request
-    rv = self.dispatch_request()
-         ^^^^^^^^^^^^^^^^^^^^^^^
-  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\app.py", line 1499, in dispatch_request
-    return self.ensure_sync(self.view_functions[rule.endpoint])(**req.view_args)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\Mostafa\PROF_SER\PIPELINE-FOR-DF\app.py", line 1092, in download_file
-    return send_file(entry['path'], as_attachment=True,
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\flask\helpers.py", line 612, in send_file
-    return werkzeug.utils.send_file(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "d:\Mostafa\PROF_SER\PIPELINE-FOR-DF\.venv\Lib\site-packages\werkzeug\utils.py", line 746, in send_file
-    file = open(path, "rb")  # type: ignore
-           ^^^^^^^^^^^^^^^^
-TypeError: expected str, bytes or os.PathLike object, not NoneType
 
-"""

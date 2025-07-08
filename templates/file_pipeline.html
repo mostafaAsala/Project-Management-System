@@ -21,6 +21,40 @@
             50% { opacity: 1; }
             100% { opacity: 0.5; }
         }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading-text {
+            display: none;
+        }
+
+        .is-loading .loading-text {
+            display: inline;
+        }
+
+        .is-loading .normal-text {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -50,7 +84,9 @@
             <h2>Pipeline for {{ file.supplier }} - {{ file.original_filename }}</h2>
             <div>
                 <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Overview</a>
+                {% if is_admin %}
                 <a href="{{ url_for('manage_file_steps', file_id=file_id) }}" class="btn">Manage Steps</a>
+                {% endif %}
             </div>
         </div>
 
@@ -158,7 +194,9 @@
                                     <option value="In Progress" {% if step_data.status == 'In Progress' %}selected{% endif %}>In Progress</option>
                                     <option value="Completed" {% if step_data.status == 'Completed' %}selected{% endif %}>Completed</option>
                                 </select>
-                                <button class="btn btn-small btn-upload upload-btn" data-step="{{ step }}" data-file-id="{{ file_id }}">Upload</button>
+                                <button class="btn btn-small btn-upload upload-btn" data-step="{{ step }}" data-file-id="{{ file_id }}">
+                                    <span class="normal-text">Upload</span>
+                                </button>
                                 {% endif %}
                                 <button class="btn btn-small download-btn" data-step="{{ step }}">Download</button>
                                 {% if is_admin %}
@@ -277,7 +315,11 @@
                         </div>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn">Upload</button>
+                            <button type="submit" id="upload-submit-btn" class="btn">
+                                <span class="spinner" style="display: none;"></span>
+                                <span class="normal-text">Upload</span>
+                                <span class="loading-text">Uploading...</span>
+                            </button>
                             <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
                         </div>
                     </form>
@@ -423,6 +465,18 @@
                 uploadFileId.value = fileId;
                 uploadStep.value = step;
 
+                // Reset the upload form and button state if it was previously submitted
+                const submitBtn = document.getElementById('upload-submit-btn');
+                submitBtn.classList.remove('is-loading');
+                submitBtn.disabled = false;
+                submitBtn.querySelector('.spinner').style.display = 'none';
+
+                // Reset the file input
+                document.getElementById('upload-file').value = '';
+
+                // Reset the comment textarea
+                document.getElementById('upload-comment').value = '';
+
                 // Show the modal
                 uploadModal.classList.remove('hidden');
             });
@@ -472,6 +526,20 @@
                     alert('An error occurred while fetching users');
                 });
             });
+        });
+
+        // Handle upload form submission with loading indicator
+        document.getElementById('upload-form').addEventListener('submit', function(e) {
+            const submitBtn = document.getElementById('upload-submit-btn');
+            const spinner = submitBtn.querySelector('.spinner');
+
+            // Show loading state
+            submitBtn.classList.add('is-loading');
+            submitBtn.disabled = true;
+            spinner.style.display = 'inline-block';
+
+            // Form will submit normally
+            // The loading state will remain until the page reloads with the response
         });
 
         // Close modals

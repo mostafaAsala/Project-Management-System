@@ -1,4 +1,5 @@
 @echo off
+title File Pipeline
 SET FLASK_ENV=production
 SET FLASK_APP=wsgi.py
 
