@@ -158,19 +158,53 @@
         </div>
 
         <div class="table-container">
-            <table class="files-table">
+            <!-- Filter Row -->
+            <div style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <label>Supplier:
+                    <select id="filter-supplier">
+                        <option value="">All</option>
+                        {% for type in files.values()|map(attribute='supplier')|unique %}
+                        <option value="{{ type }}">{{ type }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Process Type:
+                    <select id="filter-process-type">
+                        <option value="">All</option>
+                        {% for type in files.values()|map(attribute='process_type')|unique %}
+                        <option value="{{ type }}">{{ type }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Current Step:
+                    <select id="filter-step">
+                        <option value="">All</option>
+                        {% for type in files.values()|map(attribute='current_step')|unique %}
+                        <option value="{{ type }}">{{ type|capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Status:
+                    <select id="filter-status">
+                        <option value="">All</option>
+                        <option value="Completed">Completed</option>
+                        <option value="In Progress">In Progress</option>
+                    </select>
+                </label>
+            </div>
+            <table class="files-table" id="main-table">
                 <thead>
                     <tr>
-                        <th>Supplier</th>
-                        <th>Process Type</th>
-                        <th>Filename</th>
-                        <th>Current Step</th>
-                        <th>Creation Time</th>
-                        <th>Last Update</th>
-                        <th>Total Time</th>
-                        <th>Current Step Time</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <th data-col="0">Supplier <button class="sort-btn" data-col="0">⇅</button></th>
+                        <th data-col="1">Process Type <button class="sort-btn" data-col="1">⇅</button></th>
+                        <th data-col="2">Filename <button class="sort-btn" data-col="2">⇅</button></th>
+                        <th data-col="3">Current Step <button class="sort-btn" data-col="3">⇅</button></th>
+                        <th data-col="4">Creation Time <button class="sort-btn" data-col="4">⇅</button></th>
+                        <th data-col="5">Last Update <button class="sort-btn" data-col="5">⇅</button></th>
+                        <th data-col="6">Total Time <button class="sort-btn" data-col="6">⇅</button></th>
+                        <th data-col="7">Current Step Time <button class="sort-btn" data-col="7">⇅</button></th>
+                        <th data-col="8">Status <button class="sort-btn" data-col="8">⇅</button></th>
+                        <th data-col="9">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -468,6 +502,61 @@
                         alert('An error occurred while deleting the file');
                     });
                 }
+            });
+        });
+
+        // Filtering logic
+        function filterTable() {
+            const supplier = document.getElementById('filter-supplier').value;
+            const processType = document.getElementById('filter-process-type').value;
+            const step = document.getElementById('filter-step').value;
+            const status = document.getElementById('filter-status').value;
+            const table = document.getElementById('main-table');
+            const rows = table.tBodies[0].rows;
+            for (let i = 0; i < rows.length; i++) {
+                const cells = rows[i].cells;
+                if (cells.length < 10) continue; // skip no-data row
+                let show = true;
+                if (supplier && cells[0].textContent.trim() !== supplier) show = false;
+                if (processType && cells[1].textContent.trim() !== processType) show = false;
+                if (step && cells[3].textContent.trim().toLowerCase() !== step.toLowerCase()) show = false;
+                if (status) {
+                    const statusText = cells[8].textContent.trim();
+                    if (status === 'Completed' && statusText !== 'Completed') show = false;
+                    if (status === 'In Progress' && statusText !== 'In Progress') show = false;
+                }
+                rows[i].style.display = show ? '' : 'none';
+            }
+        }
+        document.getElementById('filter-supplier').addEventListener('change', filterTable);
+        document.getElementById('filter-process-type').addEventListener('change', filterTable);
+        document.getElementById('filter-step').addEventListener('change', filterTable);
+        document.getElementById('filter-status').addEventListener('change', filterTable);
+
+        // Sorting logic
+        let sortCol = null;
+        let sortAsc = true;
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const col = parseInt(this.getAttribute('data-col'));
+                const table = document.getElementById('main-table');
+                const tbody = table.tBodies[0];
+                const rows = Array.from(tbody.rows).filter(r => r.cells.length === 10);
+                if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; }
+                rows.sort((a, b) => {
+                    let v1 = a.cells[col].textContent.trim();
+                    let v2 = b.cells[col].textContent.trim();
+                    // Try to parse as date or number
+                    if (!isNaN(Date.parse(v1)) && !isNaN(Date.parse(v2))) {
+                        v1 = new Date(v1); v2 = new Date(v2);
+                    } else if (!isNaN(v1) && !isNaN(v2)) {
+                        v1 = parseFloat(v1); v2 = parseFloat(v2);
+                    }
+                    if (v1 < v2) return sortAsc ? -1 : 1;
+                    if (v1 > v2) return sortAsc ? 1 : -1;
+                    return 0;
+                });
+                rows.forEach(row => tbody.appendChild(row));
             });
         });
     </script>
