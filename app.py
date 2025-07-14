@@ -688,6 +688,191 @@ def file_pipeline(file_id):
                           username=session['username'],
                           is_admin=users_db.get(session['username'], {}).get('is_admin', False))
 
+@app.route('/statistics')
+def statistics():
+    print("\n[EXECUTING] statistics() - Statistics page route")
+    if 'username' not in session:
+        print("[STEP] User not in session, redirecting to login")
+        return redirect(url_for('login'))
+
+    print("[STEP] Calculating comprehensive statistics")
+
+    # Initialize statistics data
+    stats = {
+        'total_files': len(files_db),
+        'total_users': len(users_db),
+        'total_steps': len(steps),
+        'user_stats': {},
+        'step_stats': {},
+        'supplier_stats': {},
+        'process_type_stats': {},
+        'overdue_stats': {
+            'total_overdue_files': 0,
+            'total_overdue_steps': 0,
+            'overdue_by_step': {},
+            'overdue_by_user': {}
+        },
+        'time_stats': {
+            'total_time_worked': 0,
+            'average_time_per_file': 0,
+            'average_time_per_step': 0
+        },
+        'file_distribution': {
+            'by_step': {},
+            'by_status': {'Not Started': 0, 'In Progress': 0, 'Completed': 0}
+        }
+    }
+
+    # Initialize step statistics
+    for step in steps:
+        stats['step_stats'][step] = {
+            'total_files': 0,
+            'completed_files': 0,
+            'in_progress_files': 0,
+            'not_started_files': 0,
+            'total_time_worked': 0,
+            'average_time': 0,
+            'overdue_files': 0,
+            'assigned_users': len(step_assignments.get(step, []))
+        }
+        stats['file_distribution']['by_step'][step] = 0
+        stats['overdue_stats']['overdue_by_step'][step] = 0
+
+    # Initialize user statistics
+    for username in users_db:
+        stats['user_stats'][username] = {
+            'total_files_worked': 0,
+            'total_time_worked': 0,
+            'average_time_per_file': 0,
+            'completed_steps': 0,
+            'in_progress_steps': 0,
+            'overdue_steps': 0,
+            'assigned_steps': users_db[username].get('roles', [])
+        }
+        stats['overdue_stats']['overdue_by_user'][username] = 0
+
+    # Process each file for statistics
+    for file_id, file in files_db.items():
+        current_step = file.get('current_step')
+        supplier = file.get('supplier', 'Unknown')
+        process_type = file.get('process_type', 'Unknown')
+
+        # Supplier statistics
+        if supplier not in stats['supplier_stats']:
+            stats['supplier_stats'][supplier] = {
+                'total_files': 0,
+                'total_time_worked': 0,
+                'average_time': 0,
+                'overdue_files': 0
+            }
+        stats['supplier_stats'][supplier]['total_files'] += 1
+
+        # Process type statistics
+        if process_type not in stats['process_type_stats']:
+            stats['process_type_stats'][process_type] = {
+                'total_files': 0,
+                'total_time_worked': 0,
+                'average_time': 0
+            }
+        stats['process_type_stats'][process_type]['total_files'] += 1
+
+        # File distribution by current step
+        if current_step:
+            stats['file_distribution']['by_step'][current_step] = stats['file_distribution']['by_step'].get(current_step, 0) + 1
+
+        # Check if file has any overdue steps
+        file_has_overdue = False
+
+        # Process step statuses for this file
+        step_statuses = file.get('step_statuses', {})
+        for step, step_data in step_statuses.items():
+            if isinstance(step_data, dict):
+                status = step_data.get('status', 'Not Started')
+                total_time_worked = step_data.get('total_time_worked', 0)
+                is_overdue = step_data.get('is_overdue', False)
+                updated_by = step_data.get('updated_by')
+
+                # Update step statistics
+                if step in stats['step_stats']:
+                    stats['step_stats'][step]['total_files'] += 1
+                    stats['step_stats'][step]['total_time_worked'] += total_time_worked
+
+                    if status == 'Completed':
+                        stats['step_stats'][step]['completed_files'] += 1
+                        stats['file_distribution']['by_status']['Completed'] += 1
+                    elif status == 'In Progress':
+                        stats['step_stats'][step]['in_progress_files'] += 1
+                        stats['file_distribution']['by_status']['In Progress'] += 1
+                    else:
+                        stats['step_stats'][step]['not_started_files'] += 1
+                        stats['file_distribution']['by_status']['Not Started'] += 1
+
+                    if is_overdue:
+                        stats['step_stats'][step]['overdue_files'] += 1
+                        stats['overdue_stats']['overdue_by_step'][step] += 1
+                        stats['overdue_stats']['total_overdue_steps'] += 1
+                        file_has_overdue = True
+
+                # Update user statistics
+                if updated_by and updated_by in stats['user_stats']:
+                    stats['user_stats'][updated_by]['total_time_worked'] += total_time_worked
+
+                    if status == 'Completed':
+                        stats['user_stats'][updated_by]['completed_steps'] += 1
+                    elif status == 'In Progress':
+                        stats['user_stats'][updated_by]['in_progress_steps'] += 1
+
+                    if is_overdue:
+                        stats['user_stats'][updated_by]['overdue_steps'] += 1
+                        stats['overdue_stats']['overdue_by_user'][updated_by] += 1
+
+                # Update total time statistics
+                stats['time_stats']['total_time_worked'] += total_time_worked
+
+                # Update supplier time statistics
+                stats['supplier_stats'][supplier]['total_time_worked'] += total_time_worked
+
+                # Update process type time statistics
+                stats['process_type_stats'][process_type]['total_time_worked'] += total_time_worked
+
+        # Count files with overdue steps
+        if file_has_overdue:
+            stats['overdue_stats']['total_overdue_files'] += 1
+            stats['supplier_stats'][supplier]['overdue_files'] += 1
+
+    # Calculate averages
+    if stats['total_files'] > 0:
+        stats['time_stats']['average_time_per_file'] = stats['time_stats']['total_time_worked'] / stats['total_files']
+
+    # Calculate step averages
+    for step, step_data in stats['step_stats'].items():
+        if step_data['total_files'] > 0:
+            step_data['average_time'] = step_data['total_time_worked'] / step_data['total_files']
+
+    # Calculate user averages
+    for username, user_data in stats['user_stats'].items():
+        files_worked = user_data['completed_steps'] + user_data['in_progress_steps']
+        user_data['total_files_worked'] = files_worked
+        if files_worked > 0:
+            user_data['average_time_per_file'] = user_data['total_time_worked'] / files_worked
+
+    # Calculate supplier averages
+    for supplier, supplier_data in stats['supplier_stats'].items():
+        if supplier_data['total_files'] > 0:
+            supplier_data['average_time'] = supplier_data['total_time_worked'] / supplier_data['total_files']
+
+    # Calculate process type averages
+    for process_type, pt_data in stats['process_type_stats'].items():
+        if pt_data['total_files'] > 0:
+            pt_data['average_time'] = pt_data['total_time_worked'] / pt_data['total_files']
+
+    print(f"[STEP] Statistics calculated - Total files: {stats['total_files']}, Total overdue files: {stats['overdue_stats']['total_overdue_files']}")
+
+    return render_template('statistics.html',
+                          stats=stats,
+                          username=session['username'],
+                          is_admin=users_db.get(session['username'], {}).get('is_admin', False))
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -2055,7 +2240,7 @@ def manage_step_users(file_id):
     return redirect(url_for('file_pipeline', file_id=file_id))
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5002)
+    app.run(debug=True, host='0.0.0.0', port=5102)
 
 
 
