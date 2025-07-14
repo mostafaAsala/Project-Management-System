@@ -14,6 +14,7 @@ STEP_ASSIGNMENTS_FILE = os.path.join(DATA_DIR, 'step_assignments.pkl')
 CUSTOM_STEPS_FILE = os.path.join(DATA_DIR, 'custom_steps.pkl')
 PROCESS_TYPES_FILE = os.path.join(DATA_DIR, 'process_types.pkl')
 DEFAULT_ASSIGNED_TIMES_FILE = os.path.join(DATA_DIR, 'default_assigned_times.pkl')
+NOTIFICATIONS_FILE = os.path.join(DATA_DIR, 'notifications.pkl')
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 
 # Ensure data directories exist
@@ -54,7 +55,7 @@ def load_custom_steps():
     else:
         return []
 
-def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, process_types=None, default_assigned_times=None):
+def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, process_types=None, default_assigned_times=None, notifications_db=None):
     """
     Save all data to files.
     """
@@ -69,6 +70,8 @@ def save_data(users_db, files_db, steps_list, step_assignments, custom_steps_lis
         save_process_types(process_types)
     if default_assigned_times is not None:
         save_default_assigned_times(default_assigned_times)
+    if notifications_db is not None:
+        save_notifications(notifications_db)
     create_backup()
 
 def mark_data_changed():
@@ -234,6 +237,30 @@ def save_default_assigned_times(default_assigned_times):
     except Exception as e:
         print(f"Error saving default assigned times data: {e}")
 
+def load_notifications():
+    """
+    Load notifications database from file.
+    """
+    if os.path.exists(NOTIFICATIONS_FILE):
+        try:
+            with open(NOTIFICATIONS_FILE, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Error loading notifications data: {e}")
+            return {}
+    else:
+        return {}
+
+def save_notifications(notifications_db):
+    """
+    Save notifications database to file.
+    """
+    try:
+        with open(NOTIFICATIONS_FILE, 'wb') as f:
+            pickle.dump(notifications_db, f)
+    except Exception as e:
+        print(f"Error saving notifications data: {e}")
+
 def create_default_process_types():
     """
     Create default process types list.
@@ -293,7 +320,7 @@ def create_backup():
             except Exception as e:
                 print(f"Error creating backup for {file_path}: {e}")
 
-def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, process_types=None, default_assigned_times=None, interval=60):
+def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_steps_list=None, process_types=None, default_assigned_times=None, notifications_db=None, interval=60):
     """
     Start auto-save thread that saves data at regular intervals if changes were made.
     """
@@ -311,7 +338,7 @@ def start_auto_save(users_db, files_db, steps_list, step_assignments, custom_ste
             # Check if data has changed
             if _data_changed:
                 with _save_lock:
-                    save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list, process_types, default_assigned_times)
+                    save_data(users_db, files_db, steps_list, step_assignments, custom_steps_list, process_types, default_assigned_times, notifications_db)
                     _data_changed = False
                     print(f"Auto-saved data at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 

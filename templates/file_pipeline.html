@@ -55,6 +55,177 @@
         .is-loading .normal-text {
             display: none;
         }
+
+        /* Notification styles */
+        .notification-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .notification-btn {
+            position: relative;
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+
+        .notification-btn:hover {
+            background: #2980b9;
+        }
+
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #e74c3c;
+            color: white;
+            border-radius: 50%;
+            padding: 2px 6px;
+            font-size: 12px;
+            font-weight: bold;
+            min-width: 18px;
+            text-align: center;
+            display: none;
+        }
+
+        .notification-badge.show {
+            display: block;
+        }
+
+        .notification-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            width: 350px;
+            max-height: 400px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+
+        .notification-dropdown.show {
+            display: block;
+        }
+
+        .notification-header {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            background: #f8f9fa;
+            border-radius: 5px 5px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .notification-header h3 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .mark-all-read-btn {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .mark-all-read-btn:hover {
+            background: #219a52;
+        }
+
+        .notification-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .notification-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .notification-item:hover {
+            background: #f8f9fa;
+        }
+
+        .notification-item.unread {
+            background: #e8f4fd;
+            border-left: 3px solid #3498db;
+        }
+
+        .notification-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .notification-message {
+            color: #666;
+            font-size: 13px;
+            line-height: 1.4;
+            margin-bottom: 5px;
+        }
+
+        .notification-time {
+            color: #999;
+            font-size: 11px;
+        }
+
+        .notification-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .mark-read-btn {
+            background: #95a5a6;
+            color: white;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .mark-read-btn:hover {
+            background: #7f8c8d;
+        }
+
+        .open-file-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .open-file-btn:hover {
+            background: #2980b9;
+        }
+
+        .no-notifications {
+            padding: 20px;
+            text-align: center;
+            color: #999;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -62,6 +233,24 @@
         <h1>File Processing Pipeline</h1>
         <div class="user-info">
             <span>Welcome, {{ username }}</span>
+
+            <!-- Notification Button -->
+            <div class="notification-container">
+                <button class="notification-btn" id="notification-btn">
+                    🔔
+                    <span class="notification-badge" id="notification-badge">0</span>
+                </button>
+                <div class="notification-dropdown" id="notification-dropdown">
+                    <div class="notification-header">
+                        <h3>Notifications</h3>
+                        <button class="mark-all-read-btn" id="mark-all-read-btn">Mark All Read</button>
+                    </div>
+                    <div class="notification-list" id="notification-list">
+                        <div class="no-notifications">Loading notifications...</div>
+                    </div>
+                </div>
+            </div>
+
             <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
             {% if is_admin %}
             <a href="{{ url_for('register') }}" class="btn btn-small">Register User</a>
@@ -695,6 +884,159 @@
                 }
             }
         });
+
+        // Notification system
+        let notificationDropdownOpen = false;
+
+        // Load notifications on page load
+        loadNotifications();
+
+        // Toggle notification dropdown
+        document.getElementById('notification-btn').addEventListener('click', function(e) {
+            e.stopPropagation();
+            notificationDropdownOpen = !notificationDropdownOpen;
+            const dropdown = document.getElementById('notification-dropdown');
+
+            if (notificationDropdownOpen) {
+                dropdown.classList.add('show');
+                loadNotifications(); // Refresh notifications when opened
+            } else {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (notificationDropdownOpen && !e.target.closest('.notification-container')) {
+                document.getElementById('notification-dropdown').classList.remove('show');
+                notificationDropdownOpen = false;
+            }
+        });
+
+        // Mark all notifications as read
+        document.getElementById('mark-all-read-btn').addEventListener('click', function() {
+            fetch('/api/notifications/mark_all_read', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadNotifications(); // Refresh notifications
+                }
+            })
+            .catch(error => {
+                console.error('Error marking all notifications as read:', error);
+            });
+        });
+
+        // Load notifications function
+        function loadNotifications() {
+            fetch('/api/notifications')
+                .then(response => response.json())
+                .then(data => {
+                    updateNotificationBadge(data.unread_count);
+                    displayNotifications(data.notifications);
+                })
+                .catch(error => {
+                    console.error('Error loading notifications:', error);
+                    document.getElementById('notification-list').innerHTML =
+                        '<div class="no-notifications">Error loading notifications</div>';
+                });
+        }
+
+        // Update notification badge
+        function updateNotificationBadge(count) {
+            const badge = document.getElementById('notification-badge');
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.classList.add('show');
+            } else {
+                badge.classList.remove('show');
+            }
+        }
+
+        // Display notifications
+        function displayNotifications(notifications) {
+            const notificationList = document.getElementById('notification-list');
+
+            if (notifications.length === 0) {
+                notificationList.innerHTML = '<div class="no-notifications">No notifications</div>';
+                return;
+            }
+
+            let html = '';
+            notifications.forEach(notification => {
+                const isUnread = !notification.read;
+                const timeAgo = formatTimeAgo(notification.timestamp);
+
+                html += `
+                    <div class="notification-item ${isUnread ? 'unread' : ''}" data-id="${notification.id}">
+                        <div class="notification-title">${notification.title}</div>
+                        <div class="notification-message">${notification.message}</div>
+                        <div class="notification-time">${timeAgo}</div>
+                        <div class="notification-actions">
+                            ${isUnread ? `<button class="mark-read-btn" onclick="markNotificationRead('${notification.id}')">Mark as Read</button>` : ''}
+                            ${notification.file_id ? `<button class="open-file-btn" onclick="openFile('${notification.file_id}')">Open File</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            notificationList.innerHTML = html;
+        }
+
+        // Mark single notification as read
+        function markNotificationRead(notificationId) {
+            fetch('/api/notifications/mark_read', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    notification_id: notificationId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadNotifications(); // Refresh notifications
+                }
+            })
+            .catch(error => {
+                console.error('Error marking notification as read:', error);
+            });
+        }
+
+        // Open file from notification
+        function openFile(fileId) {
+            window.location.href = `/file_pipeline/${fileId}`;
+        }
+
+        // Format time ago
+        function formatTimeAgo(timestamp) {
+            const now = new Date();
+            const time = new Date(timestamp);
+            const diffInSeconds = Math.floor((now - time) / 1000);
+
+            if (diffInSeconds < 60) {
+                return 'Just now';
+            } else if (diffInSeconds < 3600) {
+                const minutes = Math.floor(diffInSeconds / 60);
+                return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+            } else if (diffInSeconds < 86400) {
+                const hours = Math.floor(diffInSeconds / 3600);
+                return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+            } else {
+                const days = Math.floor(diffInSeconds / 86400);
+                return `${days} day${days > 1 ? 's' : ''} ago`;
+            }
+        }
+
+        // Refresh notifications every 30 seconds
+        setInterval(loadNotifications, 30000);
     </script>
 </body>
 </html>

@@ -38,6 +38,11 @@ default_assigned_times = data_manager.load_default_assigned_times()
 if not default_assigned_times:
     default_assigned_times = {step: 0 for step in steps}  # Default to 0 minutes for all steps
 
+# Initialize notifications database
+notifications_db = data_manager.load_notifications()
+if not notifications_db:
+    notifications_db = {}  # Initialize empty notifications database
+
 # Migrate existing files to add creation_time if missing
 def migrate_files_creation_time():
     for _, file in files_db.items():
@@ -55,19 +60,109 @@ def migrate_files_creation_time():
 migrate_files_creation_time()
 
 # Start auto-save
-data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times, interval=30)
+data_manager.start_auto_save(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times, notifications_db, interval=30)
 
 # Register function to save data when the application exits
 def save_data_on_exit():
-    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times)
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times, notifications_db)
     data_manager.stop_auto_save()
 
 # Function to manually save all data
 def save_all_data():
-    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times)
+    data_manager.save_data(users_db, files_db, steps, step_assignments, custom_steps_list, process_types, default_assigned_times, notifications_db)
     data_manager.create_backup()
 
 atexit.register(save_data_on_exit)
+
+# Helper function to create a notification
+def create_notification(username, notification_type, title, message, file_id=None, step=None):
+    """Create a notification for a user"""
+    if username not in notifications_db:
+        notifications_db[username] = []
+
+    notification = {
+        'id': str(uuid.uuid4()),
+        'type': notification_type,  # 'file_assigned', 'step_overdue', 'file_completed', etc.
+        'title': title,
+        'message': message,
+        'file_id': file_id,
+        'step': step,
+        'timestamp': datetime.now().isoformat(),
+        'read': False
+    }
+
+    notifications_db[username].append(notification)
+    data_manager.mark_data_changed()
+    return notification
+
+# Helper function to get user notifications
+def get_user_notifications(username, unread_only=False):
+    """Get notifications for a user"""
+    if username not in notifications_db:
+        return []
+
+    user_notifications = notifications_db[username]
+    if unread_only:
+        return [n for n in user_notifications if not n.get('read', False)]
+
+    # Sort by timestamp (newest first)
+    return sorted(user_notifications, key=lambda x: x['timestamp'], reverse=True)
+
+# Helper function to mark notification as read
+def mark_notification_read(username, notification_id):
+    """Mark a notification as read"""
+    if username not in notifications_db:
+        return False
+
+    for notification in notifications_db[username]:
+        if notification['id'] == notification_id:
+            notification['read'] = True
+            data_manager.mark_data_changed()
+            return True
+    return False
+
+# Helper function to generate notifications for files in user's steps
+def generate_user_file_notifications(username):
+    """Generate notifications for files that are in the user's assigned steps"""
+    if username not in users_db:
+        return
+
+    user_roles = users_db[username].get('roles', [])
+    user_custom_steps = users_db[username].get('custom_steps', [])
+    user_steps = set(user_roles + user_custom_steps)
+
+    # Clear existing file assignment notifications to avoid duplicates
+    if username in notifications_db:
+        notifications_db[username] = [n for n in notifications_db[username]
+                                    if n.get('type') != 'file_assigned']
+
+    for file_id, file in files_db.items():
+        current_step = file.get('current_step')
+
+        # Check if user is assigned to current step
+        if current_step in user_steps:
+            # Check file-specific assignments if they exist
+            file_assignments = file.get('step_assignments', {})
+            if current_step in file_assignments:
+                if username in file_assignments[current_step]:
+                    create_notification(
+                        username,
+                        'file_assigned',
+                        f'File in your step: {current_step}',
+                        f'File "{file.get("original_filename", "Unknown")}" is currently in step "{current_step}" which is assigned to you.',
+                        file_id=file_id,
+                        step=current_step
+                    )
+            else:
+                # Fall back to global role assignment
+                create_notification(
+                    username,
+                    'file_assigned',
+                    f'File in your step: {current_step}',
+                    f'File "{file.get("original_filename", "Unknown")}" is currently in step "{current_step}" which is assigned to you.',
+                    file_id=file_id,
+                    step=current_step
+                )
 
 # Helper function to check if user is authorized for a step
 def is_authorized_for_step(username, step, file_id=None):
@@ -269,12 +364,73 @@ def save_all_data_route():
     except Exception as e:
         return jsonify({"success": False, "message": f"Error saving data: {str(e)}"}), 500
 
+@app.route('/api/notifications')
+def get_notifications():
+    """Get notifications for the current user"""
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    username = session['username']
+    unread_only = request.args.get('unread_only', 'false').lower() == 'true'
+
+    # Generate fresh notifications for files in user's steps
+    generate_user_file_notifications(username)
+
+    notifications = get_user_notifications(username, unread_only)
+    unread_count = len([n for n in get_user_notifications(username) if not n.get('read', False)])
+
+    return jsonify({
+        "notifications": notifications,
+        "unread_count": unread_count
+    })
+
+@app.route('/api/notifications/mark_read', methods=['POST'])
+def mark_notification_read_route():
+    """Mark a notification as read"""
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    data = request.json
+    notification_id = data.get('notification_id')
+
+    if not notification_id:
+        return jsonify({"error": "Missing notification_id"}), 400
+
+    username = session['username']
+    success = mark_notification_read(username, notification_id)
+
+    if success:
+        return jsonify({"success": True})
+    else:
+        return jsonify({"error": "Notification not found"}), 404
+
+@app.route('/api/notifications/mark_all_read', methods=['POST'])
+def mark_all_notifications_read():
+    """Mark all notifications as read for the current user"""
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    username = session['username']
+
+    if username in notifications_db:
+        for notification in notifications_db[username]:
+            notification['read'] = True
+        data_manager.mark_data_changed()
+
+    return jsonify({"success": True})
+
 @app.route('/')
 def index():
     print("\n[EXECUTING] index() - Main page route")
     if 'username' not in session:
         print("[STEP] User not in session, redirecting to login")
         return redirect(url_for('login'))
+
+    username = session['username']
+    print(f"[STEP] User {username} accessing main page")
+
+    # Generate notifications for files in user's steps
+    generate_user_file_notifications(username)
 
     print("[STEP] Calculating current step time data for each file")
     # Calculate current step time data for each file
