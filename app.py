@@ -8,6 +8,8 @@ import uuid
 import json
 import copy
 import atexit
+import zipfile
+import tempfile
 import data_manager
 
 app = Flask(__name__)
@@ -1516,6 +1518,168 @@ def download_file(file_id, step):
     print(f"[STEP] No file version found for step: {step}")
     flash('Version not found')
     return redirect(url_for('index'))
+
+@app.route('/download_previous_step_files', methods=['POST'])
+def download_previous_step_files():
+    print(f"\n[EXECUTING] download_previous_step_files() - Downloading previous step files for user's assigned steps")
+    if 'username' not in session:
+        print("[STEP] User not in session, returning authentication error")
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    username = session['username']
+    print(f"[STEP] Processing download request for user: {username}")
+
+    # Get user's assigned steps
+    user_roles = users_db.get(username, {}).get('roles', [])
+    user_custom_steps = users_db.get(username, {}).get('custom_steps', [])
+    user_assigned_steps = set(user_roles + user_custom_steps)
+
+    print(f"[STEP] User {username} is assigned to steps: {user_assigned_steps}")
+
+    if not user_assigned_steps:
+        return jsonify({"success": False, "message": "User has no assigned steps"}), 400
+
+    # Find all files that are currently in user's assigned steps
+    files_in_user_steps = []
+    for file_id, file in files_db.items():
+        current_step = file.get('current_step')
+        if current_step in user_assigned_steps:
+            # Check file-specific assignments if they exist
+            file_assignments = file.get('step_assignments', {})
+            if current_step in file_assignments:
+                # Check if user is specifically assigned to this file's current step
+                if username in file_assignments[current_step]:
+                    files_in_user_steps.append((file_id, file, current_step))
+                    print(f"[STEP] File {file_id} is in user's assigned step '{current_step}' (file-specific assignment)")
+            else:
+                # Fall back to global role assignment
+                files_in_user_steps.append((file_id, file, current_step))
+                print(f"[STEP] File {file_id} is in user's assigned step '{current_step}' (global assignment)")
+
+    print(f"[STEP] Found {len(files_in_user_steps)} files in user's assigned steps")
+
+    if not files_in_user_steps:
+        return jsonify({"success": False, "message": "No files found in your assigned steps"}), 404
+
+    # Collect files from previous steps
+    files_to_download = []
+
+    for file_id, file, current_step in files_in_user_steps:
+        file_steps = file.get('custom_steps', steps)
+
+        print(f"[STEP] Processing file {file_id} - Current step: {current_step}")
+
+        if not current_step or current_step not in file_steps:
+            print(f"[STEP] File {file_id} has invalid current step, skipping")
+            continue
+
+        # Find the previous step
+        current_step_index = file_steps.index(current_step)
+        if current_step_index == 0:
+            print(f"[STEP] File {file_id} is at the first step, no previous step available")
+            continue
+
+        previous_step = file_steps[current_step_index - 1]
+        print(f"[STEP] Previous step for file {file_id}: {previous_step}")
+
+        # Find the latest file from the previous step
+        latest_file_entry = None
+        for entry in reversed(file.get('history', [])):
+            if entry.get('step') == previous_step and entry.get('path') and os.path.exists(entry['path']):
+                latest_file_entry = entry
+                break
+
+        if latest_file_entry:
+            files_to_download.append({
+                'file_id': file_id,
+                'original_filename': file.get('original_filename', 'unknown'),
+                'supplier': file.get('supplier', 'unknown'),
+                'process_type': file.get('process_type', 'unknown'),
+                'current_step': current_step,
+                'previous_step': previous_step,
+                'entry': latest_file_entry
+            })
+            print(f"[STEP] Added file {file_id} from step {previous_step}: {latest_file_entry['filename']}")
+        else:
+            print(f"[STEP] No file found for previous step {previous_step} in file {file_id}")
+
+    if not files_to_download:
+        return jsonify({"success": False, "message": "No files found from previous steps"}), 404
+
+    print(f"[STEP] Creating zip file with {len(files_to_download)} files")
+
+    # Create a temporary zip file
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    temp_zip_path = temp_zip.name
+    temp_zip.close()
+
+    try:
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_info in files_to_download:
+                entry = file_info['entry']
+                file_path = entry['path']
+
+                if os.path.exists(file_path):
+                    # Create a meaningful filename for the zip organized by current step
+                    current_step_clean = file_info['current_step'].replace(' ', '_').replace('/', '_')
+                    previous_step_clean = file_info['previous_step'].replace(' ', '_').replace('/', '_')
+                    supplier_clean = file_info['supplier'].replace(' ', '_').replace('/', '_')
+
+                    # Organize files in folders by current step (the step user is working on)
+                    zip_filename = f"{current_step_clean}/{supplier_clean}_{previous_step_clean}_{entry['filename']}"
+                    zipf.write(file_path, zip_filename)
+                    print(f"[STEP] Added to zip: {zip_filename}")
+                else:
+                    print(f"[STEP] File not found on disk: {file_path}")
+
+        # Generate a descriptive filename for the download based on user's assigned steps
+        user_steps_desc = []
+        if user_assigned_steps:
+            # Get unique current steps from the files we're processing
+            current_steps_in_download = set()
+            for file_info in files_to_download:
+                current_steps_in_download.add(file_info['current_step'])
+
+            if current_steps_in_download:
+                user_steps_desc.append(f"user_{username}")
+                if len(current_steps_in_download) == 1:
+                    step_name = list(current_steps_in_download)[0].replace(' ', '_')
+                    user_steps_desc.append(f"from_step_{step_name}")
+                else:
+                    user_steps_desc.append(f"from_{len(current_steps_in_download)}_steps")
+
+        if user_steps_desc:
+            zip_filename = f"previous_step_files_{'_'.join(user_steps_desc)}.zip"
+        else:
+            zip_filename = f"previous_step_files_user_{username}.zip"
+
+        print(f"[STEP] Sending zip file: {zip_filename}")
+
+        def remove_temp_file():
+            try:
+                os.unlink(temp_zip_path)
+                print(f"[STEP] Cleaned up temporary file: {temp_zip_path}")
+            except Exception as e:
+                print(f"[STEP] Error cleaning up temporary file: {e}")
+
+        # Send the file and schedule cleanup
+        response = send_file(temp_zip_path, as_attachment=True, download_name=zip_filename)
+
+        # Schedule the temp file for deletion after the response is sent
+        # Note: This is a simple approach; in production, you might want a more robust cleanup mechanism
+        import atexit
+        atexit.register(remove_temp_file)
+
+        return response
+
+    except Exception as e:
+        print(f"[STEP] Error creating zip file: {e}")
+        # Clean up temp file on error
+        try:
+            os.unlink(temp_zip_path)
+        except:
+            pass
+        return jsonify({"success": False, "message": f"Error creating zip file: {str(e)}"}), 500
 
 @app.route('/api/files')
 def get_files():

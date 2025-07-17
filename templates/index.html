@@ -38,6 +38,16 @@
             background-color: #2980b9;
         }
 
+        .btn-secondary {
+            background-color: #95a5a6;
+            color: white;
+            font-weight: bold;
+        }
+
+        .btn-secondary:hover {
+            background-color: #7f8c8d;
+        }
+
         /* Notification styles */
         .notification-container {
             position: relative;
@@ -294,6 +304,7 @@
             <h2>Files Overview</h2>
             <div>
                 <button id="upload-new-btn" class="btn">Upload New File</button>
+                <button id="download-previous-step-btn" class="btn btn-secondary">Download Previous Step Files</button>
                 {% if is_admin %}
                 <button id="save-all-data-btn" class="btn btn-primary">Save All Data</button>
                 {% endif %}
@@ -902,6 +913,69 @@
 
         // Refresh notifications every 30 seconds
         setInterval(loadNotifications, 30000);
+
+        // Download previous step files functionality
+        document.getElementById('download-previous-step-btn').addEventListener('click', function() {
+            // No need to get filters or visible files - we'll process all files on server side
+            // based on user's assigned steps
+
+            // Show loading state
+            this.disabled = true;
+            this.textContent = 'Preparing Download...';
+
+            // Send request to download previous step files for user's assigned steps
+            fetch('/download_previous_step_files', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    // No file_ids or filters needed - server will determine based on user assignments
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Get filename from response headers
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    let filename = 'previous_step_files.zip';
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                        if (filenameMatch) {
+                            filename = filenameMatch[1];
+                        }
+                    }
+
+                    // Create blob and download
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    });
+                } else {
+                    return response.json().then(data => {
+                        throw new Error(data.message || 'Failed to download files');
+                    });
+                }
+            })
+            .then(() => {
+                // Reset button state
+                this.disabled = false;
+                this.textContent = 'Download Previous Step Files';
+            })
+            .catch(error => {
+                console.error('Error downloading files:', error);
+                alert('Error downloading files: ' + error.message);
+                // Reset button state
+                this.disabled = false;
+                this.textContent = 'Download Previous Step Files';
+            });
+        });
     </script>
 </body>
 </html>
