@@ -115,12 +115,17 @@ def mark_notification_read(username, notification_id):
     """Mark a notification as read"""
     if username not in notifications_db:
         return False
-
+    print(notifications_db[username])
+    print("notification id: ",notification_id)
     for notification in notifications_db[username]:
         if notification['id'] == notification_id:
             notification['read'] = True
             data_manager.mark_data_changed()
+            
+            print("All nots: ",notifications_db[username])
+            print("Marked notification as read: ", notification)
             return True
+    
     return False
 
 # Helper function to generate notifications for files in user's steps
@@ -137,7 +142,7 @@ def generate_user_file_notifications(username):
     if username in notifications_db:
         notifications_db[username] = [n for n in notifications_db[username]
                                     if n.get('type') != 'file_assigned']
-
+    print("\n[EXECUTING] generate_user_file_notifications() - Generating notifications for user:", username)
     for file_id, file in files_db.items():
         current_step = file.get('current_step')
 
@@ -1420,76 +1425,142 @@ def upload_file():
 
 @app.route('/upload_to_step', methods=['POST'])
 def upload_to_step():
-    print("\n[EXECUTING] upload_to_step() - Uploading file to specific step")
+    print("\n[EXECUTING] upload_to_step() - Uploading file to specific step or updating status")
     if 'username' not in session:
-        print("[STEP] User not in session, redirecting to login")
-        return redirect(url_for('login'))
+        print("[STEP] User not in session, returning authentication error")
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
 
-    if 'file' not in request.files:
-        print("[STEP] No file part in request")
-        flash('No file part')
-        return redirect(url_for('index'))
-
-    file = request.files['file']
+    username = session['username']
     file_id = request.form.get('file_id')
     step = request.form.get('step')
+    status = request.form.get('status')
     comment = request.form.get('comment', '')
-    print(f"[STEP] Upload details - File ID: {file_id}, Step: {step}, Filename: {file.filename}, Comment: {comment}")
 
-    # Validate inputs
-    if not file_id or not step:
+    print(f"[STEP] Upload request - File: {file_id}, Step: {step}, Status: {status}, User: {username}")
+
+    # Validate required inputs
+    if not file_id or not step or not status:
         print("[STEP] Missing required parameters")
-        flash('Missing required parameters')
-        return redirect(url_for('index'))
+        return jsonify({"success": False, "message": "Missing required parameters (file_id, step, or status)"}), 400
 
     if file_id not in files_db:
         print(f"[STEP] File {file_id} not found in database")
-        flash('File not found')
-        return redirect(url_for('index'))
+        return jsonify({"success": False, "message": "File not found"}), 404
 
     # Check if user is authorized for this step
-    if not is_authorized_for_step(session['username'], step, file_id):
-        print(f"[STEP] User {session['username']} not authorized for step {step}")
-        flash(f'You are not authorized to upload files for the {step} step')
-        return redirect(url_for('file_pipeline', file_id=file_id))
+    if not is_authorized_for_step(username, step, file_id):
+        print(f"[STEP] User {username} not authorized for step {step}")
+        return jsonify({"success": False, "message": "Not authorized for this step"}), 403
 
-    if file.filename == '':
-        print("[STEP] No selected file (empty filename)")
-        flash('No selected file')
-        return redirect(url_for('file_pipeline', file_id=file_id))
+    try:
+        # Check if file was uploaded (optional)
+        file_uploaded = False
+        uploaded_file = None
+        file_path = None
+        unique_filename = None
 
-    filename = secure_filename(file.filename)
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-    print(f"[STEP] Secured filename: {filename}, Timestamp: {timestamp}")
+        if 'file' in request.files and request.files['file'].filename != '':
+            uploaded_file = request.files['file']
+            file_uploaded = True
+            print(f"[STEP] File will be uploaded: {uploaded_file.filename}")
 
-    # Save file with unique name
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{step}_{timestamp.replace(':', '_').replace('.', '_')}_{filename}")
-    print(f"[STEP] Saving file to path: {file_path}")
-    file.save(file_path)
-    print(f"[STEP] File saved successfully")
+            # Save the uploaded file
+            filename = secure_filename(uploaded_file.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            unique_filename = f"{timestamp}_{filename}"
 
-    # Add entry to history
-    print(f"[STEP] Adding history entry for step: {step}")
-    files_db[file_id]['history'].append({
-        'step': step,
-        'timestamp': timestamp,
-        'filename': filename,
-        'path': file_path,
-        'user': session['username'],
-        'comment': comment
-    })
+            # Create step directory if it doesn't exist
+            step_dir = os.path.join(app.config['UPLOAD_FOLDER'], step.replace(' ', '_').lower())
+            os.makedirs(step_dir, exist_ok=True)
 
-    # Update the current step based on completed steps
-    print(f"[STEP] Updating current step based on completed steps")
-    update_current_step(file_id)
+            file_path = os.path.join(step_dir, unique_filename)
+            uploaded_file.save(file_path)
 
-    # Mark data as changed
-    print(f"[STEP] Marking data as changed")
-    data_manager.mark_data_changed()
+            print(f"[STEP] File saved to: {file_path}")
+        else:
+            print(f"[STEP] No file uploaded - status-only update")
 
-    print(f"[STEP] Upload to step complete, redirecting to file pipeline")
-    flash('File uploaded successfully')
-    return redirect(url_for('file_pipeline', file_id=file_id))
+        # Update file database
+        file_data = files_db[file_id]
+
+        # Update step status
+        if 'step_statuses' not in file_data:
+            file_data['step_statuses'] = {}
+
+        file_data['step_statuses'][step] = {
+            'status': status,
+            'last_update': datetime.now().isoformat(),
+            'updated_by': username,
+            'assigned_time': file_data.get('step_statuses', {}).get(step, {}).get('assigned_time', 0)
+        }
+
+        # Add to history
+        if 'history' not in file_data:
+            file_data['history'] = []
+
+        if file_uploaded:
+            # File upload entry
+            history_entry = {
+                'step': step,
+                'status': status,
+                'timestamp': datetime.now().isoformat(),
+                'user': username,
+                'filename': unique_filename,
+                'path': file_path,
+                'comment': comment
+            }
+        else:
+            # Status-only update entry
+            history_entry = {
+                'step': step,
+                'status': status,
+                'timestamp': datetime.now().isoformat(),
+                'user': username,
+                'filename': f"Status update to {status}",
+                'path': None,  # No file for status-only updates
+                'comment': comment
+            }
+
+        file_data['history'].append(history_entry)
+
+        # If status is completed, move to next step
+        if status == 'Completed':
+            file_steps = file_data.get('custom_steps', steps)
+            current_step_index = file_steps.index(step)
+
+            if current_step_index < len(file_steps) - 1:
+                next_step = file_steps[current_step_index + 1]
+                file_data['current_step'] = next_step
+
+                # Initialize next step status
+                if next_step not in file_data['step_statuses']:
+                    file_data['step_statuses'][next_step] = {
+                        'status': 'In Progress',
+                        'last_update': datetime.now().isoformat(),
+                        'assigned_time': default_assigned_times.get(next_step, 0)
+                    }
+
+                print(f"[STEP] File moved to next step: {next_step}")
+            else:
+                print(f"[STEP] File completed all steps")
+
+        # Mark data as changed for auto-save
+        data_manager.mark_data_changed()
+
+        success_message = f"Step '{step}' updated to '{status}'"
+        if file_uploaded:
+            success_message += " with file upload"
+
+        print(f"[STEP] Successfully updated file {file_id} in step {step} with status {status}")
+
+        return jsonify({
+            "success": True,
+            "message": success_message
+        })
+
+    except Exception as e:
+        print(f"[STEP] Error updating step: {e}")
+        return jsonify({"success": False, "message": f"Error updating step: {str(e)}"}), 500
 
 @app.route('/download/<file_id>/<step>')
 def download_file(file_id, step):
@@ -1680,6 +1751,69 @@ def download_previous_step_files():
         except:
             pass
         return jsonify({"success": False, "message": f"Error creating zip file: {str(e)}"}), 500
+
+@app.route('/download_single_previous_step_file', methods=['POST'])
+def download_single_previous_step_file():
+    print(f"\n[EXECUTING] download_single_previous_step_file() - Downloading previous step file for single file")
+    if 'username' not in session:
+        print("[STEP] User not in session, returning authentication error")
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+    data = request.json
+    file_id = data.get('file_id')
+
+    print(f"[STEP] Received request for file: {file_id}")
+
+    if not file_id:
+        return jsonify({"success": False, "message": "No file ID specified"}), 400
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    file = files_db[file_id]
+    current_step = file.get('current_step')
+    file_steps = file.get('custom_steps', steps)
+
+    print(f"[STEP] Processing file {file_id} - Current step: {current_step}")
+
+    if not current_step or current_step not in file_steps:
+        return jsonify({"success": False, "message": "File has invalid current step"}), 400
+
+    # Find the previous step
+    current_step_index = file_steps.index(current_step)
+    if current_step_index == 0:
+        return jsonify({"success": False, "message": "File is at the first step, no previous step available"}), 400
+
+    previous_step = file_steps[current_step_index - 1]
+    print(f"[STEP] Previous step for file {file_id}: {previous_step}")
+
+    # Find the latest file from the previous step
+    latest_file_entry = None
+    for entry in reversed(file.get('history', [])):
+        if entry.get('step') == previous_step and entry.get('path') and os.path.exists(entry['path']):
+            latest_file_entry = entry
+            break
+
+    if not latest_file_entry:
+        return jsonify({"success": False, "message": f"No file found for previous step '{previous_step}'"}), 404
+
+    print(f"[STEP] Found file from step {previous_step}: {latest_file_entry['filename']}")
+
+    try:
+        # Generate a descriptive filename for the download
+        supplier_clean = file.get('supplier', 'unknown').replace(' ', '_').replace('/', '_')
+        previous_step_clean = previous_step.replace(' ', '_').replace('/', '_')
+        original_filename = latest_file_entry['filename']
+
+        download_filename = f"{supplier_clean}_{previous_step_clean}_{original_filename}"
+
+        print(f"[STEP] Sending file: {latest_file_entry['path']} as {download_filename}")
+
+        return send_file(latest_file_entry['path'], as_attachment=True, download_name=download_filename)
+
+    except Exception as e:
+        print(f"[STEP] Error sending file: {e}")
+        return jsonify({"success": False, "message": f"Error downloading file: {str(e)}"}), 500
 
 @app.route('/api/files')
 def get_files():
@@ -2558,6 +2692,29 @@ def manage_step_users(file_id):
 
     flash(f'Users for step "{step}" updated successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
+
+@app.route('/api/file_info/<file_id>')
+def get_file_info(file_id):
+    """Get file information for the upload modal"""
+    if 'username' not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if file_id not in files_db:
+        return jsonify({"success": False, "message": "File not found"}), 404
+
+    file = files_db[file_id]
+    return jsonify({
+        "success": True,
+        "file": {
+            "original_filename": file.get('original_filename', 'Unknown'),
+            "supplier": file.get('supplier', 'Unknown'),
+            "process_type": file.get('process_type', 'Unknown'),
+            "current_step": file.get('current_step', 'Unknown'),
+            "step_statuses": file.get('step_statuses', {})
+        }
+    })
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5102)

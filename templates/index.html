@@ -212,11 +212,132 @@
             background: #2980b9;
         }
 
+        .download-prev-btn {
+            background: #f39c12;
+            color: white;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .download-prev-btn:hover {
+            background: #e67e22;
+        }
+
+        .upload-btn {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .upload-btn:hover {
+            background: #219a52;
+        }
+
         .no-notifications {
             padding: 20px;
             text-align: center;
             color: #999;
             font-style: italic;
+        }
+
+        /* Upload modal styles */
+        .upload-modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .upload-modal-content {
+            background-color: white;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 5px;
+            width: 500px;
+            max-width: 90%;
+        }
+
+        .upload-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .upload-modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .upload-modal-close:hover {
+            color: #333;
+        }
+
+        .upload-form-group {
+            margin-bottom: 15px;
+        }
+
+        .upload-form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .upload-form-group input,
+        .upload-form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            box-sizing: border-box;
+        }
+
+        .upload-form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .upload-form-actions button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .upload-submit-btn {
+            background: #27ae60;
+            color: white;
+        }
+
+        .upload-submit-btn:hover {
+            background: #219a52;
+        }
+
+        .upload-cancel-btn {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .upload-cancel-btn:hover {
+            background: #7f8c8d;
         }
 
         /* Loading spinner */
@@ -261,6 +382,7 @@
             <span>Welcome, {{ username }}</span>
 
             <!-- Notification Button -->
+            {% if true %}
             <div class="notification-container">
                 <button class="notification-btn" id="notification-btn">
                     🔔
@@ -276,7 +398,7 @@
                     </div>
                 </div>
             </div>
-
+            {% endif %}
             <!--<a href="{{ url_for('statistics') }}" class="btn btn-small">Statistics</a>-->
             <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
             {% if is_admin %}
@@ -304,7 +426,9 @@
             <h2>Files Overview</h2>
             <div>
                 <button id="upload-new-btn" class="btn">Upload New File</button>
+                {% if false %}
                 <button id="download-previous-step-btn" class="btn btn-secondary">Download Previous Step Files</button>
+                {% endif %}
                 {% if is_admin %}
                 <button id="save-all-data-btn" class="btn btn-primary">Save All Data</button>
                 {% endif %}
@@ -353,6 +477,49 @@
                             <span class="loading-text">Uploading...</span>
                         </button>
                         <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Notification Upload Modal -->
+        <div id="notification-upload-modal" class="upload-modal">
+            <div class="upload-modal-content">
+                <div class="upload-modal-header">
+                    <h3>Upload File to Step</h3>
+                    <button class="upload-modal-close" id="notification-upload-close">&times;</button>
+                </div>
+                <form id="notification-upload-form" enctype="multipart/form-data">
+                    <div class="upload-form-group">
+                        <label>File Information:</label>
+                        <div id="upload-file-info" style="background: #f8f9fa; padding: 10px; border-radius: 3px; margin-bottom: 10px;">
+                            <!-- File info will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    <div class="upload-form-group">
+                        <label for="notification-upload-file">Select File to Upload (Optional):</label>
+                        <input type="file" id="notification-upload-file" name="file">
+                        <small style="color: #666; font-size: 12px;">Leave empty to update status only</small>
+                    </div>
+                    <div class="upload-form-group">
+                        <label for="notification-upload-status">New Step Status:</label>
+                        <select id="notification-upload-status" name="status" required>
+                            <option value="Completed">Completed</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="On Hold">On Hold</option>
+                            <option value="Rejected">Rejected</option>
+                        </select>
+                    </div>
+                    <div class="upload-form-group">
+                        <label for="notification-upload-comment">Comment (optional):</label>
+                        <input type="text" id="notification-upload-comment" name="comment" placeholder="Enter a comment about this update">
+                    </div>
+                    <div class="upload-form-actions">
+                        <button type="submit" class="upload-submit-btn">
+                            <span class="normal-text">Upload & Update Step</span>
+                            <span class="loading-text">Uploading...</span>
+                        </button>
+                        <button type="button" class="upload-cancel-btn" id="notification-upload-cancel">Cancel</button>
                     </div>
                 </form>
             </div>
@@ -856,6 +1023,8 @@
                         <div class="notification-actions">
                             ${isUnread ? `<button class="mark-read-btn" onclick="markNotificationRead('${notification.id}')">Mark as Read</button>` : ''}
                             ${notification.file_id ? `<button class="open-file-btn" onclick="openFile('${notification.file_id}')">Open File</button>` : ''}
+                            ${notification.file_id ? `<!--<button class="download-prev-btn" onclick="downloadPreviousStepFile('${notification.file_id}')">Download Previous</button>-->` : ''}
+                            ${notification.file_id ? `<!--<button class="upload-btn" onclick="openUploadModal('${notification.file_id}', '${notification.step}')">Upload to Step</button>-->` : ''}
                         </div>
                     </div>
                 `;
@@ -875,7 +1044,8 @@
                     notification_id: notificationId
                 })
             })
-            .then(response => response.json())
+            .then(
+                response => response.json())
             .then(data => {
                 if (data.success) {
                     loadNotifications(); // Refresh notifications
@@ -888,7 +1058,7 @@
 
         // Open file from notification
         function openFile(fileId) {
-            window.location.href = `/file_pipeline/${fileId}`;
+            window.location.href = `/file/${fileId}`;
         }
 
         // Format time ago
@@ -913,6 +1083,194 @@
 
         // Refresh notifications every 30 seconds
         setInterval(loadNotifications, 30000);
+
+        // Download previous step file for a specific file
+        function downloadPreviousStepFile(fileId) {
+            // Show loading state
+            const button = event.target;
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Downloading...';
+
+            fetch('/download_single_previous_step_file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    file_id: fileId
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Get filename from response headers
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    let filename = 'previous_step_file.zip';
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                        if (filenameMatch) {
+                            filename = filenameMatch[1];
+                        }
+                    }
+
+                    // Create blob and download
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    });
+                } else {
+                    return response.json().then(data => {
+                        throw new Error(data.message || 'Failed to download file');
+                    });
+                }
+            })
+            .then(() => {
+                // Reset button state
+                button.disabled = false;
+                button.textContent = originalText;
+            })
+            .catch(error => {
+                console.error('Error downloading file:', error);
+                alert('Error downloading file: ' + error.message);
+                // Reset button state
+                button.disabled = false;
+                button.textContent = originalText;
+            });
+        }
+
+        // Open upload modal for a specific file and step
+        let currentUploadFileId = null;
+        let currentUploadStep = null;
+
+        function openUploadModal(fileId, step) {
+            currentUploadFileId = fileId;
+            currentUploadStep = step;
+
+            // Get file information
+            fetch(`/api/file_info/${fileId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const fileInfo = data.file;
+                        document.getElementById('upload-file-info').innerHTML = `
+                            <strong>File:</strong> ${fileInfo.original_filename}<br>
+                            <strong>Supplier:</strong> ${fileInfo.supplier}<br>
+                            <strong>Process Type:</strong> ${fileInfo.process_type}<br>
+                            <strong>Current Step:</strong> ${fileInfo.current_step}<br>
+                            <strong>Step Status:</strong> ${fileInfo.step_statuses[step]?.status || 'Unknown'}
+                        `;
+
+                        // Show modal
+                        document.getElementById('notification-upload-modal').style.display = 'block';
+                    } else {
+                        alert('Error loading file information: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading file info:', error);
+                    alert('Error loading file information');
+                });
+        }
+
+        // Close upload modal
+        document.getElementById('notification-upload-close').addEventListener('click', function() {
+            console.log('Upload form cancelled');
+            document.getElementById('notification-upload-modal').style.display = 'none';
+            currentUploadFileId = null;
+            currentUploadStep = null;
+        });
+
+        document.getElementById('notification-upload-cancel').addEventListener('click', function() {
+            console.log('Upload form cancelled');
+            document.getElementById('notification-upload-modal').style.display = 'none';
+            currentUploadFileId = null;
+            currentUploadStep = null;
+        });
+
+        // Handle upload form submission
+        document.getElementById('notification-upload-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            console.log('Upload form submitted');
+
+            if (!currentUploadFileId || !currentUploadStep) {
+                alert('Error: No file or step selected');
+                return;
+            }
+
+            const formData = new FormData();
+            const fileInput = document.getElementById('notification-upload-file');
+            const statusSelect = document.getElementById('notification-upload-status');
+            const commentInput = document.getElementById('notification-upload-comment');
+
+            // File is optional - append if selected
+            if (fileInput.files[0]) {
+                formData.append('file', fileInput.files[0]);
+                console.log('File selected for upload:', fileInput.files[0].name);
+            } else {
+                console.log('No file selected - status-only update');
+            }
+
+            formData.append('file_id', currentUploadFileId);
+            formData.append('step', currentUploadStep);
+            formData.append('status', statusSelect.value);
+            formData.append('comment', commentInput.value);
+
+            // Show loading state
+            const submitBtn = this.querySelector('.upload-submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.querySelector('.normal-text').style.display = 'none';
+            submitBtn.querySelector('.loading-text').style.display = 'inline';
+            console.log('Form data:', formData);
+            
+            fetch('/upload_to_step', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Data:', data);
+                if (data.success) {
+                    alert(data.message || 'Step updated successfully!');
+                    // Close modal
+                    document.getElementById('notification-upload-modal').style.display = 'none';
+                    // Refresh notifications
+                    loadNotifications();
+                    // Refresh page to show updated file status
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.message || 'Unknown error occurred'));
+                }
+            })
+            .catch(error => {
+                console.error('Error updating step:', error);
+                alert('Error updating step: ' + error.message);
+            })
+            .finally(() => {
+                // Reset button state
+                submitBtn.disabled = false;
+                submitBtn.querySelector('.normal-text').style.display = 'inline';
+                submitBtn.querySelector('.loading-text').style.display = 'none';
+
+                // Reset form
+                this.reset();
+                currentUploadFileId = null;
+                currentUploadStep = null;
+            });
+        });
 
         // Download previous step files functionality
         document.getElementById('download-previous-step-btn').addEventListener('click', function() {
