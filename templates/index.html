@@ -382,7 +382,7 @@
             <span>Welcome, {{ username }}</span>
 
             <!-- Notification Button -->
-            {% if true %}
+            
             <div class="notification-container">
                 <button class="notification-btn" id="notification-btn">
                     🔔
@@ -398,8 +398,8 @@
                     </div>
                 </div>
             </div>
-            {% endif %}
-            <!--<a href="{{ url_for('statistics') }}" class="btn btn-small">Statistics</a>-->
+            
+            <a href="{{ url_for('statistics') }}" class="btn btn-small">Statistics</a>
             <a href="{{ url_for('logout') }}" class="btn btn-small">Logout</a>
             {% if is_admin %}
             <a href="{{ url_for('register') }}" class="btn btn-small">Register User</a>
@@ -426,9 +426,9 @@
             <h2>Files Overview</h2>
             <div>
                 <button id="upload-new-btn" class="btn">Upload New File</button>
-                {% if false %}
+                
                 <button id="download-previous-step-btn" class="btn btn-secondary">Download Previous Step Files</button>
-                {% endif %}
+                
                 {% if is_admin %}
                 <button id="save-all-data-btn" class="btn btn-primary">Save All Data</button>
                 {% endif %}
@@ -1023,8 +1023,8 @@
                         <div class="notification-actions">
                             ${isUnread ? `<button class="mark-read-btn" onclick="markNotificationRead('${notification.id}')">Mark as Read</button>` : ''}
                             ${notification.file_id ? `<button class="open-file-btn" onclick="openFile('${notification.file_id}')">Open File</button>` : ''}
-                            ${notification.file_id ? `<!--<button class="download-prev-btn" onclick="downloadPreviousStepFile('${notification.file_id}')">Download Previous</button>-->` : ''}
-                            ${notification.file_id ? `<!--<button class="upload-btn" onclick="openUploadModal('${notification.file_id}', '${notification.step}')">Upload to Step</button>-->` : ''}
+                            ${notification.file_id ? `<button class="download-prev-btn" onclick="downloadPreviousStepFile('${notification.file_id}')">Download Previous</button>` : ''}
+                            ${notification.file_id ? `<button class="upload-btn" onclick="openUploadModal('${notification.file_id}', '${notification.step}')">Upload to Step</button>` : ''}
                         </div>
                     </div>
                 `;

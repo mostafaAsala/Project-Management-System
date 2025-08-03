@@ -10,6 +10,8 @@ import copy
 import atexit
 import zipfile
 import tempfile
+import threading
+import time
 import data_manager
 
 app = Flask(__name__)
@@ -76,6 +78,55 @@ def save_all_data():
 
 atexit.register(save_data_on_exit)
 
+# Notification scanner thread variables
+notification_scanner_thread = None
+stop_notification_scanner = False
+
+def notification_scanner():
+    """Background thread that scans for notification changes every 10 minutes"""
+    global stop_notification_scanner
+    print("[NOTIFICATION SCANNER] Starting notification scanner thread...")
+
+    while not stop_notification_scanner:
+        try:
+            # Wait for 10 minutes (600 seconds)
+            for _ in range(600):  # Check every second for stop signal
+                if stop_notification_scanner:
+                    break
+                time.sleep(1)
+
+            if not stop_notification_scanner:
+                print("[NOTIFICATION SCANNER] Running periodic notification scan...")
+                scan_and_update_file_notifications()
+
+        except Exception as e:
+            print(f"[NOTIFICATION SCANNER] Error in notification scanner: {e}")
+            # Continue running even if there's an error
+            time.sleep(60)  # Wait 1 minute before retrying
+
+    print("[NOTIFICATION SCANNER] Notification scanner thread stopped")
+
+def start_notification_scanner():
+    """Start the notification scanner thread"""
+    global notification_scanner_thread, stop_notification_scanner
+
+    if notification_scanner_thread is None or not notification_scanner_thread.is_alive():
+        stop_notification_scanner = False
+        notification_scanner_thread = threading.Thread(target=notification_scanner, daemon=True)
+        notification_scanner_thread.start()
+        print("[NOTIFICATION SCANNER] Notification scanner thread started")
+
+def stop_notification_scanner_thread():
+    """Stop the notification scanner thread"""
+    global stop_notification_scanner
+    stop_notification_scanner = True
+    if notification_scanner_thread and notification_scanner_thread.is_alive():
+        notification_scanner_thread.join(timeout=5)
+        print("[NOTIFICATION SCANNER] Notification scanner thread stopped")
+
+# Register cleanup function
+atexit.register(stop_notification_scanner_thread)
+
 # Helper function to create a notification
 def create_notification(username, notification_type, title, message, file_id=None, step=None):
     """Create a notification for a user"""
@@ -128,48 +179,120 @@ def mark_notification_read(username, notification_id):
     
     return False
 
-# Helper function to generate notifications for files in user's steps
-def generate_user_file_notifications(username):
-    """Generate notifications for files that are in the user's assigned steps"""
-    if username not in users_db:
-        return
+# Helper function to create a unique notification key for file assignments
+def get_notification_key(username, file_id, step):
+    """Generate a unique key for file assignment notifications"""
+    return f"{username}:{file_id}:{step}"
 
-    user_roles = users_db[username].get('roles', [])
-    user_custom_steps = users_db[username].get('custom_steps', [])
-    user_steps = set(user_roles + user_custom_steps)
+# Helper function to check if a notification already exists
+def notification_exists(username, file_id, step):
+    """Check if a notification already exists for this user, file, and step"""
+    if username not in notifications_db:
+        return False
 
-    # Clear existing file assignment notifications to avoid duplicates
-    if username in notifications_db:
-        notifications_db[username] = [n for n in notifications_db[username]
-                                    if n.get('type') != 'file_assigned']
-    print("\n[EXECUTING] generate_user_file_notifications() - Generating notifications for user:", username)
-    for file_id, file in files_db.items():
-        current_step = file.get('current_step')
+    for notification in notifications_db[username]:
+        if (notification.get('type') == 'file_assigned' and
+            notification.get('file_id') == file_id and
+            notification.get('step') == step):
+            return True
+    return False
 
-        # Check if user is assigned to current step
-        if current_step in user_steps:
-            # Check file-specific assignments if they exist
-            file_assignments = file.get('step_assignments', {})
-            if current_step in file_assignments:
-                if username in file_assignments[current_step]:
-                    create_notification(
-                        username,
-                        'file_assigned',
-                        f'File in your step: {current_step}',
-                        f'File "{file.get("original_filename", "Unknown")}" is currently in step "{current_step}" which is assigned to you.',
-                        file_id=file_id,
-                        step=current_step
-                    )
-            else:
-                # Fall back to global role assignment
+# Helper function to remove notification for a specific file/step combination
+def remove_file_notification(username, file_id, step):
+    """Remove notification for a specific file/step combination"""
+    if username not in notifications_db:
+        return False
+
+    initial_count = len(notifications_db[username])
+    notifications_db[username] = [n for n in notifications_db[username]
+                                if not (n.get('type') == 'file_assigned' and
+                                       n.get('file_id') == file_id and
+                                       n.get('step') == step)]
+
+    removed = len(notifications_db[username]) < initial_count
+    if removed:
+        data_manager.mark_data_changed()
+        print(f"[NOTIFICATION] Removed notification for user {username}, file {file_id}, step {step}")
+    return removed
+
+# Helper function to scan and update file notifications for all users
+def scan_and_update_file_notifications():
+    """Scan all files and update notifications based on current file positions"""
+    print("\n[NOTIFICATION SCAN] Starting notification scan...")
+
+    # Track current file positions for each user
+    current_user_files = {}  # {username: {file_id: step}}
+
+    # Build current state of files in user steps
+    for username in users_db:
+        user_roles = users_db[username].get('roles', [])
+        user_custom_steps = users_db[username].get('custom_steps', [])
+        user_steps = set(user_roles + user_custom_steps)
+        current_user_files[username] = {}
+
+        for file_id, file in files_db.items():
+            current_step = file.get('current_step')
+
+            # Check if user is assigned to current step
+            if current_step in user_steps:
+                # Check file-specific assignments if they exist
+                file_assignments = file.get('step_assignments', {})
+                if current_step in file_assignments:
+                    if username in file_assignments[current_step]:
+                        current_user_files[username][file_id] = current_step
+                else:
+                    # Fall back to global role assignment
+                    current_user_files[username][file_id] = current_step
+
+    # For each user, compare current state with existing notifications
+    for username in users_db:
+        if username not in notifications_db:
+            notifications_db[username] = []
+
+        # Get existing file assignment notifications
+        existing_notifications = {}  # {file_id: step}
+        for notification in notifications_db[username]:
+            if notification.get('type') == 'file_assigned':
+                file_id = notification.get('file_id')
+                step = notification.get('step')
+                if file_id and step:
+                    existing_notifications[file_id] = step
+
+        current_files = current_user_files.get(username, {})
+
+        # Remove notifications for files no longer in user's steps
+        for file_id, step in existing_notifications.items():
+            if file_id not in current_files or current_files[file_id] != step:
+                remove_file_notification(username, file_id, step)
+
+        # Add notifications for new files in user's steps
+        for file_id, step in current_files.items():
+            if not notification_exists(username, file_id, step):
+                file = files_db.get(file_id, {})
                 create_notification(
                     username,
                     'file_assigned',
-                    f'File in your step: {current_step}',
-                    f'File "{file.get("original_filename", "Unknown")}" is currently in step "{current_step}" which is assigned to you.',
+                    f'File in your step: {step}',
+                    f'File "{file.get("original_filename", "Unknown")}" is currently in step "{step}" which is assigned to you.',
                     file_id=file_id,
-                    step=current_step
+                    step=step
                 )
+                print(f"[NOTIFICATION] Created new notification for user {username}, file {file_id}, step {step}")
+
+    print("[NOTIFICATION SCAN] Notification scan completed")
+
+# Helper function to trigger immediate notification scan
+def trigger_notification_scan():
+    """Trigger an immediate notification scan (used when files change steps)"""
+    print("[NOTIFICATION] Triggering immediate notification scan due to file changes...")
+    scan_and_update_file_notifications()
+
+# Legacy function kept for backward compatibility but now uses the new scan system
+def generate_user_file_notifications(username):
+    """Generate notifications for files that are in the user's assigned steps (legacy function)"""
+    # This function is now just a wrapper that triggers a full scan
+    # to maintain backward compatibility with existing code
+    scan_and_update_file_notifications()
 
 # Helper function to check if user is authorized for a step
 def is_authorized_for_step(username, step, file_id=None):
@@ -352,6 +475,8 @@ def update_current_step(file_id):
         file['current_step'] = next_step
         # Mark data as changed
         data_manager.mark_data_changed()
+        # Trigger notification scan since file changed steps
+        trigger_notification_scan()
     else:
         print(f"[STEP] Current step remains unchanged: {file.get('current_step')}")
 
@@ -380,8 +505,8 @@ def get_notifications():
     username = session['username']
     unread_only = request.args.get('unread_only', 'false').lower() == 'true'
 
-    # Generate fresh notifications for files in user's steps
-    generate_user_file_notifications(username)
+    # Notifications are now managed by the background scanner
+    # No need to regenerate them on every API call
 
     notifications = get_user_notifications(username, unread_only)
     unread_count = len([n for n in get_user_notifications(username) if not n.get('read', False)])
@@ -436,8 +561,8 @@ def index():
     username = session['username']
     print(f"[STEP] User {username} accessing main page")
 
-    # Generate notifications for files in user's steps
-    generate_user_file_notifications(username)
+    # Notifications are now managed by the background scanner
+    # No need to regenerate them on every page load
 
     print("[STEP] Calculating current step time data for each file")
     # Calculate current step time data for each file
@@ -1419,6 +1544,9 @@ def upload_file():
     print(f"[STEP] Marking data as changed")
     data_manager.mark_data_changed()
 
+    # Trigger notification scan since new file was uploaded
+    trigger_notification_scan()
+
     print(f"[STEP] Upload complete, redirecting to index")
     flash('File uploaded successfully')
     return redirect(url_for('index'))
@@ -1546,6 +1674,9 @@ def upload_to_step():
 
         # Mark data as changed for auto-save
         data_manager.mark_data_changed()
+
+        # Trigger notification scan since file step was updated
+        trigger_notification_scan()
 
         success_message = f"Step '{step}' updated to '{status}'"
         if file_uploaded:
@@ -2116,6 +2247,9 @@ def update_status():
         # Mark data as changed
         print(f"[STEP] Marking data as changed")
         data_manager.mark_data_changed()
+
+        # Trigger notification scan since file status was updated
+        trigger_notification_scan()
         print(f"[STEP] Status update complete")
 
     return jsonify({"success": True})
@@ -2690,6 +2824,9 @@ def manage_step_users(file_id):
     # Mark data as changed
     data_manager.mark_data_changed()
 
+    # Trigger notification scan since step assignments were updated
+    trigger_notification_scan()
+
     flash(f'Users for step "{step}" updated successfully')
     return redirect(url_for('file_pipeline', file_id=file_id))
 
@@ -2717,6 +2854,13 @@ def get_file_info(file_id):
 
 
 if __name__ == '__main__':
+    # Start the notification scanner thread
+    start_notification_scanner()
+
+    # Run initial notification scan
+    print("[STARTUP] Running initial notification scan...")
+    scan_and_update_file_notifications()
+
     app.run(debug=True, host='0.0.0.0', port=5102)
 
 
